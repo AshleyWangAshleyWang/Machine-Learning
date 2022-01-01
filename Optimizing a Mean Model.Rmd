@@ -1,0 +1,145 @@
+## Optimizing a Mean Model
+
+For this question, you need to write functions to iteratively update the parameter to reduce the functional value, meaning that your function must contain the iteration steps. You can still use other build-in R functions to simplify the calculation. You cannot use the `optim()` function unless explicitly asked to. 
+
+The goal of this question is to estimate the mean of a set of samples using numerical optimization. In other words, we observe $\{y_i\}_{i=1}^n$ and using the $\ell_2$ loss, which is the same as a regression model, we want to estimate $\theta$ by minimizing the objective function 
+
+$$\ell(\theta) = \frac{1}{n} \sum_{i=1}^n (y_i - \theta)^2$$
+Generate 100 observations using the following code, change the seed to you UIN. 
+
+```{r}
+  set.seed() # random seed
+  y = rnorm(100)
+  mean(y)
+```
+
+  a) Write a function `mean_loss(theta, trainy)` that calculates the loss function given an $\theta$ values and a vector $\mathbf{y}$ of observations.  
+  
+```{r}
+mean_loss <- function(theta, trainy) mean((trainy - theta)^2)
+```
+
+  b) Use your function to calculate its value at a grid of $\theta$ values using `seq(-1.5, 1.5, 0.01)`. Plot the objective function in a figure, with $\theta$ as the horizontal axis and the objective function value as the vertical axis.
+
+```{r}
+theta_list = seq(-1.5, 1.5, 0.01)
+
+loss_list <- c()
+for(i in theta_list) {
+  loss_output <- mean_loss(y,theta = i)
+  loss_list <- c(loss_list, loss_output)
+}
+record=cbind(theta_list,loss_list)
+
+plot(record[,'theta_list'], record[,'loss_list'], type = "l", 
+     col = "deepskyblue", lwd = 1.5, xlab="theta", 
+     ylab="objective function value")
+
+theta_smll_loss_index = which.min(record[,'loss_list'])
+
+points(record[,'theta_list'][theta_smll_loss_index],
+       min(record[,'loss_list']), col = "red", pch = 19, cex = 1.5)
+```
+
+  c) Test this function using the `optim()` function and obtain the optimizer, which should be the same as the sample mean. Use 1 as the starting value and "BFGS" as the method. Compare the result with the true sample mean. 
+
+```{r}
+lm.optim <- optim(par = 1, fn = mean_loss, trainy = y, method = "BFGS")
+lm.optim$par
+```
+```{r,warning=FALSE,message=FALSE}
+library(compare)
+```
+
+```{r}
+# Compare the result with the true mean
+lm.optim$par
+compare(lm.optim$par, mean(y), ignoreNames=T)
+```
+From the above compare(.), we can get the The optimizer is the same as the sample mean.
+
+d) Write your own gradient descent algorithm to solve this problem. To do this, complete the following steps: 
+  i) Derive the gradient (derivative with respect to $\theta$) of the objective function, and write that down using Latex 
+
+$$ \nabla\ell(\theta)  =-\frac{2}{n} \sum_{i=1}^n (y_i-\theta)$$
+
+  ii) Perform a calculation of this gradient at $\theta = 1$. The result should be positive because the objective function should be moving upwards at $\theta = 1$. However, note that during the parameter update, you should move towards the negative gradient.
+```{r}
+-(2/length(y))*sum((y-1))
+```
+  
+  iii) Write your own function `optim_mean_g(trainy, theta0, delta, epsilon, maxitr)` to solve for the optimizer. If you need an example of this, see the [First-order Methods](https://teazrq.github.io/stat432/RNotes/NumOpt/NumOptMethods.html#First-order_Methods) section of this week's lecture. Make sure that you keep the history of the iterations for a plot later. Here, 
+            * `theta0` is the initial value
+            * `delta` is the step size, with default value 0.3. 
+            * `epsilon` is the stopping rule criteria
+            * `maxitr` is the maximum number of iterations
+            
+```{r}
+  optim_mean_g <- function(trainy, 
+                     theta0, # initial value
+                     delta = 0.3, # step size
+                     epsilon = 1e-6, #stopping rule
+                     maxitr = 5000) # maximum iterations
+  {
+    if (!is.vector(trainy)) stop("y must be a vector")
+    
+    # initialize beta values
+    allt = matrix(theta0, 1, length(theta0))
+
+    # iterative update
+    for (k in 1:maxitr)
+    {
+      # the new theta value
+      theta1 = theta0 + 2* sum((trainy - theta0)) * delta / length(trainy)    
+
+      # record the new theta
+      allt = rbind(allt, as.vector(theta1))
+      
+      # stopping rule
+      if (max(abs(theta0 - theta1)) < epsilon)
+        break;
+      
+      # reset beta0
+      theta0 = theta1
+    }
+
+    if (k == maxitr) cat("maximum iteration reached\n")
+    return(list("alltheta" = allt, "theta" = theta1))
+  }
+```
+
+  iv) Finally, run your algorithm with initial value $\theta_0 = 1$ and report the optimizer. 
+  
+```{r}
+# fit the model 
+mytheta=optim_mean_g(y, 1)
+mytheta$theta
+```
+
+  v) Plot the path of your gradient descent in the figure you constructed previously. Choose step size = $0.9$. What do you observe? Comment on the difference between these two situations and the impact of the step size. The following plots give you an idea what they should look like. 
+  
+The path of my gradient descent in my previously figure:
+```{r}
+plot(theta_list, loss_list, type = "l", 
+     col = "blue", lwd = 1.5, xlab="theta", 
+     ylab="objective function value")
+points(mytheta$alltheta[,1], apply(expand.grid(mytheta$alltheta[,1]), 1, mean_loss, y),
+type = "b", col = "darkgreen", pch = 20, cex = 2)
+
+```
+
+Set step size to 0.9:
+```{r}
+mytheta_plot1=optim_mean_g(y, theta0 = 1, delta = 0.9)
+mytheta_plot1$theta
+
+plot(theta_list, loss_list, type = "l", 
+     col = "blue", lwd = 1.5, xlab="theta", 
+     ylab="objective function value")
+
+points(mytheta_plot1$alltheta[,1], apply(expand.grid(mytheta_plot1$alltheta[,1]), 1, 
+      mean_loss, y),type = "b", col = "darkgreen", 
+      pch = 20, cex = 2)
+```
+
+These two plots have different step sizes. A larger step size will make the theta estimator moving too far in the beginning while smaller step size does not have this situation. However, both of them find the optimizer in the end.
