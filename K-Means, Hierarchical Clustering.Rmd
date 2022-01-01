@@ -1,0 +1,177 @@
+
+
+## K-Means
+
+* Pick your favorite image for this question. Plot the original image.
+  
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(jpeg)
+img = readJPEG("dog.jpg")
+```
+
+* Report the following information of your data:
+  + Dimension of the original image
+  + Dimension of the data once you transform the image to a version that you could apply k-means
+  + Total variations of your data
+    
+```{r}
+# dimension of the original data
+dim(img)
+```
+```{r}
+# dimension of the transformed image
+img_expand = apply(img, 3, c)
+dim(img_expand)
+```
+The dimension of both original and transformed image data are 3. Total variations of the transformed image data is 8034.
+
+* Apply $k$-means to your data. Choose three unique $k$ values to report the following result:
+  + What is the within-cluster variance?
+  + What are the cluster means?
+  + Plot the image with each pixel replaced by its corresponding cluster mean
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+```{r}
+par(mar=rep(0.1, 4),bg = "transparent",mfrow = c(1, 3))
+
+my_tibble <- tibble(
+  cluster = numeric(),
+  mean1 = numeric(),
+  mean2 = numeric(),
+  mean3 = numeric())
+
+par(mfrow=c(1,3))
+for(z in c(5,10,100)){
+  
+  kmeanfit <- kmeans(img_expand, z)
+  new_img_expand = kmeanfit$centers[kmeanfit$cluster, ]
+  
+  # cluster means
+  k_mean_centers = kmeanfit$centers
+  #  within-cluster variance
+  within_variance = kmeanfit$withinss
+  print(sum(within_variance))
+  
+  new_img = img
+  
+  x <- cbind(new_img_expand,kmeanfit$cluster) %>% as.data.frame()
+
+  for (j in unique(x$V4)){
+  
+    # calculate cluster mean for each column
+    for (i in 1:nrow(x)){
+    
+      if (x[i,4] == j){
+      
+        # replace all pixels with their cluster means
+        x[i,1] = colMeans(subset(x, x$V4 == j))[1]
+        x[i,2] = colMeans(subset(x, x$V4 == j))[2]
+        x[i,3] = colMeans(subset(x, x$V4 == j))[3]
+      }
+    }
+  }
+  
+  new_img[, , 1] = matrix(x[,1], 78, 103)
+  new_img[, , 2] = matrix(x[,2], 78, 103)
+  new_img[, , 3] = matrix(x[,3], 78, 103)
+
+  ## plot the new image
+  
+  plot(c(100, 250), c(300, 450), xaxt = 'n', yaxt = 'n', 
+    bty = 'n', pch = '', ylab = '', xlab = '', font=3)
+  title(main=paste('k= ',z),col.main="white", line = -0.9)
+  
+  rasterImage(new_img, 100, 300, 250, 450)
+  
+}
+```
+
+The within-cluster variance are 112.6263, 49.69569 and 4.255435 for k equals to 5, 10 and 100 separately.
+
+## Hierarchical Clustering
+
+The same type of image compression approach can be done using hierarchical clustering. Using the data that you prepared for the $k$-means algorithm, to perform hierarchical clustering. However, instead of using the euclidean distance with `dist()` function, you need to provide the clustering algorithm a different distance matrix $D_{n \times n}$. The $(i, j)$th element in this matrix represents the distance between observations $i$ and $j$, defined as 
+
+$$d(\bx_i, \bx_k) = \lVert\bx_i - \bx_j \rVert_1$$
+To be able to use this matrix in the `hclust()` function, you need to convert the matrix into a dist object, using the `as.dist()` function. For more details, read the documentation [here](https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/dist). 
+
+```{r}
+dist_obj = as.dist(as.matrix(dist(img_expand)))
+```
+
+Once you have all the component to perform the hierarchical clustering, do the following:
+
+* Try both complete, single and average linkage. Provide a plot of the dendrogram for both methods.
+  
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(ape)
+```
+```{r}
+# average
+ave_hc <- hclust(dist_obj, method = "average")
+par(mfrow=c(1,2))
+plot(ave_hc, hang = -1, labels = FALSE)
+plot(as.phylo(ave_hc), type = "unrooted", cex = 0.2, no.margin = TRUE)
+``` 
+From the uprooted tree, we can approximately separate the whole data to 21 clusters. 
+
+```{r}
+# complete
+comp_hc <- hclust(dist_obj, method = "complete")
+par(mfrow=c(1,2))
+plot(comp_hc, hang = -1, labels = FALSE)
+plot(as.phylo(comp_hc), type = "unrooted", cex = 0.2, no.margin = TRUE)
+```
+From the uprooted tree, we can approximately separate the whole data to 22 clusters. 
+
+```{r}
+# single
+sing_hc <- hclust(dist_obj, method = "single")
+par(mfrow=c(1,2))
+plot(sing_hc, hang = -1, labels = FALSE)
+plot(as.phylo(sing_hc), type = "unrooted", cex = 0.2, no.margin = TRUE)
+```
+The uprooted tree shows the whole data will be separated to too many clusters, so we don't put it into consideration. 
+
+* Based on what you have, pick one final clustering result. You need to explain the rational for your choice.
+  
+I'll choose complete, this is because the height is larger than average and single, which means the distance between groups are the largest. 
+  
+* Based on your final choice, calculate the cluster centers using the mean of all pixels in the cluster. Then replace all pixels in each cluster with their corresponding cluster mean. This step is similar to the k-means question. 
+* Plot this new image. 
+
+```{r}
+par(bg = "transparent",mfrow = c(1, 3))
+# combine Hierarchical Clustering result with original data set
+hx <- cbind(new_img_expand,cutree(comp_hc, k = 22)) %>% as.data.frame()
+
+for (j in unique(hx$V4)){
+  
+  # calculate cluster mean for each column
+  col_mean =  colMeans(subset(hx, hx$V4 == j))
+  
+    for (i in 1:nrow(hx)){
+      
+      # replace all pixels with their cluster means
+      if (hx[i,4] == j){
+        hx[i,1] = col_mean[1]
+        hx[i,2] = col_mean[2]
+        hx[i,3] = col_mean[3]
+      }
+    }
+  }
+  
+  new_img[, , 1] = matrix(hx[,1], 78, 103)
+  new_img[, , 2] = matrix(hx[,2], 78, 103)
+  new_img[, , 3] = matrix(hx[,3], 78, 103)
+  
+  plot(c(100, 250), c(300, 400), xaxt = 'n', yaxt = 'n', 
+    bty = 'n', pch = '', ylab = '', xlab = '', font=3)
+  title(main='k= 22',col.main="white", line = 0.9)
+  
+  rasterImage(new_img, 100, 300, 250, 400)
+```
+
