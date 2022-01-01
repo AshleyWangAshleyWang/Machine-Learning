@@ -1,0 +1,211 @@
+
+## Fitting KNN
+
+We are going to use the `caret` package to do a full tuning. Use the Handwritten Digit Data in the lecture note. The data contains two sets: `zip.train` and `zip.test`. The first column is the true digit. For this question, [5 points] subset the data to include only two digits: 4 and 9. Hence, this is a two-class classification problem. You need to setup the following tuning method using the `caret` package. Apply this tuning to the training dataset. 
+
+  * Use repeated 5-fold cross-validation, with 3 repeats. 
+  * For $k$, use all integers from 1 to 10 
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(ElemStatLearn)
+library(caret)
+library(kknn)
+library(class)
+```
+```{r}
+# prepare data (subset to contain only 4 and 9)
+training=zip.train[which((zip.train[,1] == 4)|(zip.train[,1] == 9)), ]
+testing=zip.test[which((zip.test[,1] == 4)|(zip.test[,1] == 9)), ]
+```
+```{r}
+# separate training/ testing data to x and y
+x <- training[,-1]
+y <- as.integer(training[,1])
+xt <- testing[,-1]
+yt <- as.integer(testing[,1])
+```
+```{r}
+# build the control function
+control <- trainControl(method = "repeatedcv", number = 5,repeats=3)
+```
+```{r}
+set.seed(670144148)
+knn.cvfit <- train(y ~ ., method = "knn", 
+                   data = data.frame("x" = x, "y" = as.factor(y)),
+                   tuneGrid = data.frame(k = seq(1, 10, 1)),
+                   trControl = control)
+```
+
+After completing the cross-validation of your training data, report the best tuning and produce a plot that shows $k$ against the cross-validation error. Predict the class label in the testing data. 
+
+  * Present the confusion table for the testing data 
+  * Calculate and report the testing error
+
+```{r}
+# plot to find the best tuning
+plot(knn.cvfit$results$k, 1-knn.cvfit$results$Accuracy,
+     xlab = "K", ylab = "Classification Error", type = "b",
+     pch = 19, col = "darkorange")
+```
+```{r}
+which.min(1-knn.cvfit$result$Accuracy)
+```
+The best tuning is when k equals to 1.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(caret)
+```
+```{r}
+# Predict the class label in the testing data
+knn.fit <- knn(x, xt, y, k=1)
+xtab = table(knn.fit, yt)
+confusionMatrix(xtab)
+```
+```{r}
+# calculate testing error
+sum(knn.fit!=yt)/length(yt)
+```
+The best tuning of this model is when k equals to 1. When k equals to 1, we can know from the Confusion Matrix that the Accuracy of the model is 0.95 and the testing error is 0.045.
+
+Bonus Question [5 points]: Have you noticed that when $k$ is an even number, the performance is worse than odd numbers. What could be the cause? 
+It might be caused by the majority voting of KNN. If the k is even, sometimes we need to choose class randomly, which has the chance to cause error. However, this will not happen when the k is odd. 
+
+## Intrinsic Low Dimension
+
+For this question, let's setup a simulation study. We will consider two underlying settings:
+
+  * All covariate values are independently generated from a standard normal distribution
+  * Generate the first variable $X_1$ from a standard normal distribution. And then for all other covariates, generate them by adding independent noise variables to $X_1$, i.e., $X_j = X_1 + Z_j$ where all $Z_j$s follows iid normal with mean 0 and sd $= 0.5$. 
+
+For both settings, the outcome $Y$ is generated using $Y = X_1 \times 0.5 + \epsilon$, with $\epsilon$ follows iid standard normal. Hence, the expected outcome depends only on the first variable. The goal of this experiment is to observe how the $k$NN model could be affected by the dimensionality and how an intrinsically low dimensional structure may help in this case. Complete the following questions:
+
+  a) Write a code to generate $n = 100$ observations and $p = 2$ for each setting separately. Make your code robust such that you can easily change $p$ to a different number without modifying other parts of the code. 
+  
+```{r}
+# generate data for setting 1
+s1_data <- function(p){
+  X_data<-data.frame(matrix(NA, 100, ncol = p))
+  set.seed(670144148)
+  for (i in 1:p){
+    X_data[,i]=rnorm(100, mean=0, sd=1)
+  }
+  Y<-X_data[,1]*0.5+rnorm(100, mean=0, sd=1)
+  return(cbind(Y,X_data))
+}
+```
+```{r}
+# generate data for setting 2
+s2_data <- function(p){
+  X_data<-data.frame(matrix(NA, 100, ncol = p))
+  set.seed(670144148)
+  X_data[,1]=rnorm(100, mean=0, sd=1)
+  for (i in 2:p){
+    X_data[,i]=rnorm(100, mean=0, sd=0.5)
+  }
+  Y<-X_data[,1]*0.5+rnorm(100, mean=0, sd=1)
+  return(cbind(Y,X_data))
+}
+```
+```{r}
+# generate data
+s1d=s1_data(2)
+s2d=s2_data(2)
+```
+
+  b) Fit a $5$NN regression using the generated data under each setting, and predict the same target point $x^\ast = c(0.5, 0.5, \ldots, 0.5)$, i.e., all covariates are 0.5. What is the true expected outcome in this case? 
+  
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(FNN)
+```
+```{r}
+p=2
+# the target prediction point
+x0 = matrix(rep(0.5,p),nrow=1,ncol=p)
+
+# predict through setting 1
+knn.fit1 = knn.reg(train = s1d[,-1], test = x0,
+                  y=s1d[,1], k=5, algorithm='brute')
+# predict through setting 2
+knn.fit2 = knn.reg(train = s2d[,-1], test = x0,
+                  y=s2d[,1], k=5, algorithm='brute')
+```
+```{r}
+# expected outcome of setting 1
+knn.fit1$pred
+# expected outcome of setting 2
+knn.fit2$pred
+```
+ 
+The true expected outcome is -0.3547 for setting 1 and 0.3509 for setting 2.
+
+c) For a simulation study, we need to repeat step b) many times to obtain the mean prediction error under each setting. Hence setup a simulation with `nsim = 300` and record the squared prediction error of each simulation run. After the simulation is completed, calculate the mean prediction error. At the end of this question, you should have two numbers, one for each setting. Which setting has a lower prediction error? 
+
+```{r}
+nsim = 300
+# setting 1
+p=2
+er_1=rep(NA,nsim)
+er_2=rep(NA,nsim)
+# the target prediction point
+x0 = matrix(rep(0.5,p),nrow=1,ncol=p)
+
+for(i in 1:nsim){
+  s1d=s1_data(2)
+  s2d=s2_data(2)
+  knn.fit1 = knn.reg(train = s1d[,-1], test = x0,
+                  y=s1d[,1], k=5, algorithm='brute')
+  knn.fit2 = knn.reg(train = s2d[,-1], test = x0,
+                  y=s2d[,1], k=5, algorithm='brute')
+  er_1[i]=(knn.fit1$pred-0.25)^2
+  er_2[i]=(knn.fit2$pred-0.25)^2
+}
+
+# calculate the mean prediction error
+mean(er_1)
+mean(er_2)
+```
+
+Setting 2 has lower prediction error, which equals to 0.0102. 
+
+  d) Now, let's investigate the effect of dimensionality by ranging $p$ from 2 to 50 with every integer. Before completing this question, think about what would happen to the mean prediction error for each setting? Will they increase or decrease? Which setting would increase more dramatically? Write a short paragraph to describe your expectation and why do you expect such a behavior? If you don't know the answer, then perform the next question and come back to this one once you have the result. 
+  
+The mean prediction error will increase when p increase and the data of setting 1 will increase more dramatically. This is because all of the covariates of setting 2 are based on X1, so they are some kinds of correlated, which means setting 2 is more likely in a lower dimensional space than setting 1. Also, this feature let setting 2 to have smaller mean prediction error. 
+
+  e) Setup the simulation study to obtain the estimated prediction errors for $p$ ranging from 2 to 50 under each setting. You have a double-loop for this simulation with one looping on $p$ and the other one looping on `nsim`. Be careful that your target point also needs to increase its dimension. If you need more understandings of this double loop simulation, review HW4 Q1. In that question, $\lambda$ is an analog to our $p$ here, and the Bias$^2$/Variance/Sum are analogs to our two different settings. At the end of this question, you should again provide a plot of prediction errors with changing values of $p$. Does that plot matches your expectation in part d)? 
+```{r}
+nsim = 300
+
+all_p<-matrix(NA,length(2:50),ncol=1)
+error_1<-matrix(NA,length(2:50),ncol=1)
+error_2<-matrix(NA,length(2:50),ncol=1)
+
+for (p in 2:50){
+  x0 = matrix(rep(0.5,p),nrow=1,ncol=p)
+  er_1=rep(NA,nsim)
+  er_2=rep(NA,nsim)
+  
+  for(i in 1:nsim){
+    s1d=s1_data(p)
+    s2d=s2_data(p)
+    knn.fit1 = knn.reg(train = s1d[,-1], test = x0,
+                    y=s1d[,1], k=5, algorithm='brute')
+    knn.fit2 = knn.reg(train = s2d[,-1], test = x0,
+                    y=s2d[,1], k=5, algorithm='brute')
+    er_1[i]=(knn.fit1$pred-0.25)^2
+    er_2[i]=(knn.fit2$pred-0.25)^2
+  }
+  all_p[p]=p
+  error_1[p]=mean(er_1)
+  error_2[p]=mean(er_2)
+}
+```
+```{r}
+par(mfrow=c(1,2))
+plot(all_p,error_1,type='l',
+     xlab="p",ylab="prediction errors",
+     main="setting 1",xlim=c(0,50),ylim=c(0.,2.6),col="darkorange")
+plot(all_p,error_2,type='l',
+     xlab="p",ylab="prediction errors",
+     main="setting 2",xlim=c(0,50),ylim=c(0.,2.6),col="darkorange")
+```
+The plot matches my expectation in part d, the mean prediction error of setting 1 increases more dramatically than setting 2.
