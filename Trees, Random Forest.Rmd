@@ -1,0 +1,173 @@
+
+## Fitting and Tuning Trees
+
+Use all three coriates: age, gender and salary in Social Network Ads data to predict the purchase outcome. Fit a 5-fold cross-validation CART model and answer the following question:
+
+* How large (# of terminal nodes) is the tree that gives the smallest cross-validation error? 
+* If we use the 1sd rule, obtain and plot the tree corresponding to that `cp` value. 
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(rpart)
+```
+```{r, results='hide', message=FALSE}
+# read data
+SN_Ad = read_delim('Social_Network_Ads.csv',delim=',')
+```
+```{r}
+rpart.fit = rpart(as.factor(Purchased)~ Gender+Age+EstimatedSalary, data = SN_Ad, 
+                  control = rpart.control(xval = 5))
+rpart.fit$cptable
+```
+
+```{r}
+# do the 1-sd rule
+cptarg = sqrt(rpart.fit$cptable[3,1]*rpart.fit$cptable[2,1])
+```
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(rpart.plot)
+```
+```{r}
+# obtain and plot the tree corresponding to the `cp` value
+prunedtree = prune(rpart.fit,cp=cptarg)
+rpart.plot(prunedtree)
+```
+
+The plot of the tree is as above, when the tree is splitted to three terminal nodes, it  has the smallest cross-validation error. 
+
+
+* What is the first variable that is being used to split? and what is the splitting rule? 
+
+The rule of the tree is that, we first split base on the variable **age** of our observation, check whether is smaller or greater than 43. If it is smaller than 43, we temporary classify it as 1 (it might be changed to 0 in the following split). In contrast, if its age is greater than 43, it will be classified as 1.
+
+* Based on this plot, for a new subject with age 35, and salary 10,000, what is the predicted outcome?
+  
+The predicted outcome will be 0 since the age of the subject is smaller than 43 and the estimated salary is smaller than 90000. 
+
+
+## Fitting and Tuning Random Forests
+
+The goal of this question is to learn how to read documentations of a new package yourself and be able to successfully implement it. The original `randomForest` package is a little bit slow computationally. There is a faster package `ranger`, however, it names the parameters slightly differently. Carefully read the `ranger()` function (starting from page 15) in [this documentation](https://cran.r-project.org/web/packages/ranger/ranger.pdf), and __figure out what are the corresponding parameter names for `mtry` and `nodesize`__, and also read the `caret` package random forest related documentation [here](https://topepo.github.io/caret/train-models-by-tag.html#random-forest) to find out how to specify the `train()` function and perform tuning using the `ranger` package. Then, complete the following tasks:
+
+* Load the Cleveland Clinic Heart Disease Data from HW8. Process the outcome variable `num` so that `num` > 0 is labeled as 1, and 0 otherwise (this is the same as HW8). 
+* For `ca` and `thal`, remove any observation that contains `"?"`. Then convert both variables as factors. You want to consider using the `as.factor()` function. 
+  
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidyr)
+```
+```{r, results='hide', message=FALSE, warning=FALSE}
+# step1
+CCHD = read_delim('processed_cleveland.csv', delim = ',', na = '?')
+CCHD$num = ifelse(CCHD$num > 0, 1, 0)
+# step2
+CCHD = CCHD %>% drop_na(ca) %>% drop_na(thal) %>% 
+  mutate(ca=as.factor(ca)) %>%
+  mutate(thal=as.factor(thal))
+```
+
+  
+* Construct a grid of tuning parameters using `expand.grid()` with some `mtry` and `nodesize` values. Pick 2 `mtry` values and 3 `nodesize` values at your choice. In addition, the package requires you to specify a variable `splitrule = "gini"` in this grid.
+* Construct `trControl()` to be 10 fold cross-validation
+* In your `train()` function, specify two arguments `num.trees = 300` and `respect.unordered.factors = "partition"`.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(caret)
+```  
+```{r}
+# step 3
+# construct a grid of tuning parameters
+marsGrid <- expand.grid(mtry = c(2,4), # randomly choose 2 mtry
+                        min.node.size = c(3,5,7), # randomly choose 3 nodesize
+                        splitrule="gini")
+```
+```{r}
+# step 4 & step 5
+rfFit <- train(as.factor(num)~., 
+               data = CCHD, 
+               method = "ranger",
+               
+               # Construct `trControl()` to be 10 fold cross-validation
+               trControl = trainControl(method = "cv",number = 10),
+               
+               importance="permutation",
+               tuneGrid = marsGrid,
+               num.trees = 300,
+               respect.unordered.factors = "partition")
+rfFit
+```
+
+* What is the best tuning parameter? You may want to iterate your process to narrow down to a good range of tuning. The `ranger` package utilize multiple cores of your CPU. Hence you may do this process at your computer's capacity. 
+
+The best tuning parameter for my tree is when mtry equals to 2 and node size wquals to 3, it has the highest accuracy 0.8216. 
+
+* Provide a statement to explain why we want to consider `respect.unordered.factors = "partition"`, and how is it different from its default value. 
+
+We use partition because we are splitting data, 'partition' is considered for splitting while the default value 'ignore', factors are regard ordered.
+
+
+## Simulation Study
+
+We are going to use the following code to generate data and perform simulation studies to analyze the effect of `nodesize`. Note that this is a __regression__ question and we are going to use the `randomForest` package to complete this question. Complete the following task:
+
+* Setup a simulation study to analyze the performance of random forest. For the idea of simulation, please review HW4, HW6 and HW7. Use the following setting: 
++ Your simulation should repeat `nsim = 100` times
++ Within each simulation, you should generate training and testing data using the following code, and evaluate the prediction mean squared error of random forests
++ Set `mtry` = 1 and `ntree` = 300 for all simulations
++ Use a grid of `nodesize` values: `c(1, 5, 10, 20, 30, 40)`
++ Leave all other tuning parameters as default
+  
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(MASS)
+library(randomForest)
+```
+```{r}
+library(tidyverse)
+df2 = read_delim('C:\\Users\\asus\\Downloads\\final_data(1).csv', delim=',')
+df_all <- df2[ -c(1,4,5,6,7,21) ]
+```
+
+```{r}
+# create empty tibble to put our result
+my_tibble <- tibble(
+  `node size`= numeric(),
+  mse = numeric()
+)
+
+# simulation
+nsim = 10
+grid_nodesize <- c(1, 5, 10, 20)
+
+for (i in grid_nodesize){
+  
+  all_mse <- rep(NA,length(nsim))
+  for (j in 1:nsim){
+    
+    # prepare data
+    X = df_all[-c(17,18)][0:1000,]
+    X=data.matrix(X) 
+    y = df_all[17][0:1000,]
+    y=data.matrix(y)
+    XTest = df_all[-c(17,18)][1000:2000,]
+    yTest = df_all[18][1000:2000,] 
+    
+    # fit forest 
+    rf.fit = randomForest(X, y, mtry = 1, ntree = 300, nodesize=i)
+    
+    # prediction mse
+    all_mse[j]=mean((yTest-predict(rf.fit, XTest))^2)
+  }
+  my_tibble = my_tibble %>% add_row(mse = mean(all_mse),`node size`=i)
+}
+```
+
+* Make a plot of your grid of `nodesize` values against the averaged error across all simulations.
+  
+```{r}
+plot(my_tibble$`node size`,my_tibble$mse, type='b',
+     col = "orange", lwd = 2, xlab = 'nodesize' ,ylab = 'Averaged Error')
+```
+  
+* What do you observe on this plot? Can you explain why this is happening?
+
+The average error decrease first, the error get its lower point when nodesize is 20, and then it increase again. This might be because before 20, there are not enough nodesize,  we are at the risk of over-fitting, so the error is high. And after 20, the nodesize is too large, it might be under-fitting.
