@@ -1,0 +1,288 @@
+---
+title: "Stat 432 Homework 2"
+author: "Erh-Hsuan, Wang (NetID: ewang36)"
+date: "Assigned: Aug 30, 2021; <span style='color:red'>Due: 11:59 PM CT, Sep 7, 2021</span>"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 2
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '2'
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+```{css, echo=FALSE}
+.solution {
+background-color: #CCDDFF;
+}
+```
+## Question 1 (linear regression review)
+
+Let's used the real estate data as an example. The data can be obtained from the course website. 
+```{r}
+# read the data
+realestate = read.csv("realestate.csv", row.names = 1)
+```
+
+a. Construct a new categorical variable called `season` into the real estate dataset. You should utilize the original variable `date` to perform this task and read the definition provided in our lecture notes. The `season` variable should be defined as: spring (Mar - May), summer (Jun - Aug), fall (Sep - Nov), and winter (Dec - Feb). Show a summary table to demonstrate that your variable conversion is correct. 
+
+```{r}
+# Trim and manipulate the number of digits after the decimal point
+realestate$season<-substr(realestate$date,start=5,stop =9)
+realestate$season<-as.numeric(realestate$season)
+realestate$season[is.na(realestate$season)] <- 0
+```
+
+```{r}
+# checkedDT is used to check the correctness of variable conversion,
+# we calculate the total number of each season respectively
+checkedDT=realestate
+checkedTable=as.table(table(checkedDT$season))
+spring=as.numeric(checkedTable["0.25"]+checkedTable["0.333"]+checkedTable["0.417"])
+summer=as.numeric(checkedTable["0.5"]+checkedTable["0.583"]+checkedTable["0.667"])
+winter=as.numeric(checkedTable["0"]+checkedTable["0.083"]+checkedTable["0.167"])
+fall=as.numeric(checkedTable["0.833"]+checkedTable["0.917"]+checkedTable["0.75"])
+
+# We have 96 falls, 119 springs, 110 summers and 99 winters.
+# We should get the same result  after the variable conversion.
+message('fall:',fall,', spring: ',spring,', summer: ',summer,', winter: ',winter)
+```
+
+```{r}
+# converse to season
+for (row in 1:nrow(realestate)){
+  if(realestate$season[row]==0.250||realestate$season[row]==0.333||
+     realestate$season[row]==0.417){
+    realestate$season[row]<-'spring'
+  } else if(realestate$season[row]==0.500||realestate$season[row]==0.583||
+            realestate$season[row]==0.667){
+    realestate$season[row]<-'summer'
+  } else if(realestate$season[row]==0.750||realestate$season[row]==0.833||
+            realestate$season[row]==0.917){
+    realestate$season[row]<-'fall'
+  } else {
+    realestate$season[row]<-'winter'
+  }
+}
+```
+
+```{r}
+table(realestate$season)
+```
+
+The summary table shows we have 96 falls, 119 springs, 110 summers and 99 winters after variable conversion. It is the same with the numbers we calculated before variable conversion, so the conversion is correct.
+
+
+b. Split your data into two parts: a testing data that contains 100 observations, and the rest as training data. For this question, you need to set a random seed while generating this split so that the result can be replicated. __Use your UIN as the random seed__. Report the mean `price` of your testing data and training data, respectively. 
+
+```{r}
+# split the data into training and testing
+set.seed(670144148)
+sampling=sample(1:nrow(realestate), 100)
+testing<-realestate[sampling,]
+training<-realestate[-sampling,]
+```
+
+testing mean:
+
+```{r}
+mean(testing$price)
+```
+training mean:
+
+```{r}
+mean(training$price)
+```
+c. Use the training dataset to perform a linear regression. The goal is to model `price` with `season`, `age`, `distance` and `stores`. Then use this model to predict the testing data using the `predict()` function. Calculate the training data mean squared error (__training error__):
+$$\text{Training Error} = \frac{1}{n_\text{train}} \sum_{i \in \text{Train}} (y_i - \hat y_i)^2$$
+and prediction mean squared error (__testing error__) using the testing data, defined as:
+$$\text{Testing Error} = \frac{1}{n_\text{test}} \sum_{i \in \text{Test}} (y_i - \hat y_i)^2$$
+```{r}
+# Use the training data set to perform a linear regression
+model1c=lm(price~age+distance+stores+season,training)
+# predict the testing data
+predictedTestingData=predict(model1c,testing)
+```
+
+Training error:
+```{r}
+sum((training$price-predict(model1c,training))^2)/nrow(training)
+```
+
+Testing Error:
+```{r}
+sum((testing$price-predictedTestingData)^2)/nrow(testing)
+```
+
+d. For this last part, we will explicitly calculate the parameter estimates using the linear regression solution (for details, see our lecture notes):
+$$\widehat{\boldsymbol \beta} = (\mathbf{X}^\text{T} \mathbf{X})^{-1}\mathbf{X}^\text{T} \mathbf{y}$$
+To perform this calculation, you need to properly define the data matrix $\mathbf{X}$ and the outcome vector $\mathbf{y}$ __from just your training data__. One thing to be careful here is that the data matrix $\mathbf{X}$ should contain a column of 1 to represent the intercept term. Construct such a data matrix with `season`, `age`, `distance` and `stores`, while making sure that the `season` variable is using a dummy coding. Should your dummy variable be three columns or four columns if an intercept is already included? and Why? After obtaining the parameter estimates, validate your results by calculating the training error of your model, and compare it with the value obtained from the previous question. 
+
+
+The dummy variable should be three columns because one of the level should be $\beta_0$, the reference.
+```{r}
+# X matrix
+xMatrix=matrix(NA,nrow = nrow(training), ncol = 7)
+xMatrix[,1]=1 # 1 st column for intercept
+xMatrix[,2]=training$age # 2nd column for age
+xMatrix[,3]=training$distance # 3rd column for distance
+xMatrix[,4]=training$stores # 4th column for stores
+# 5,6,7 columns for dummy variables
+for (row in 1:nrow(training)){
+  if(training$season[row]=='fall'){
+    xMatrix[row,5]<-0
+    xMatrix[row,6]<-0
+    xMatrix[row,7]<-0
+  }else if(training$season[row]=='winter'){
+    xMatrix[row,5]<-0
+    xMatrix[row,6]<-0
+    xMatrix[row,7]<-1
+  }else if(training$season[row]=='summer'){
+    xMatrix[row,5]<-0
+    xMatrix[row,6]<-1
+    xMatrix[row,7]<-0
+  }else if(training$season[row]=='spring'){
+    xMatrix[row,5]<-1
+    xMatrix[row,6]<-0
+    xMatrix[row,7]<-0
+  }
+}
+```
+
+```{r}
+# y matrix
+yMatrix=matrix(NA,nrow = nrow(training), ncol =1)
+yMatrix[,1]=training$price
+```
+
+Calculate $\widehat{\boldsymbol \beta}$:
+```{r}
+# b hat (the parameter estimates)
+bHat=solve(t(xMatrix)%*%xMatrix)%*%t(xMatrix)%*%yMatrix
+```
+
+Training error:
+```{r}
+sum((training$price-xMatrix%*%bHat)^2)/nrow(training)
+```
+
+## Question 2 (model selection)
+
+For this question, use the original six variables defined in the `realestate` data, and __treat all of them as continuous variables__. However, you should keep your training/testing split. Fit models using the training data, and when validating, use the testing data. 
+
+```{r}
+#arrange 
+realestate = read.csv("realestate.csv", row.names = 1)
+set.seed(670144148)
+sampling=sample(1:nrow(realestate), 100)
+testing<-realestate[sampling,]
+training<-realestate[-sampling,]
+```
+
+
+a. Calculate the Marrows’ $C_p$ criterion using the full model, i.e., with all variables included. Compare this result with a model that contains only `age`, `distance` and `stores`. Which is the better model based on this criterion? Compare their corresponding testing errors. Does that match your expectation? If yes, explain why you expect this to happen. If not, what could be the causes? 
+
+```{r}
+mlFull=lm(price~.,training)
+mlSub=lm(price~age+distance+stores,training)
+```
+
+Marrows’ $C_p$ of full model
+```{r}
+p=7
+n = nrow(training)
+RSS = sum(residuals(mlFull)^2)
+Cp = RSS + 2*p*summary(mlFull)$sigma^2
+Cp
+```
+
+Marrows’ $C_p$ of sub model
+```{r}
+RSS_sub = sum(residuals(mlSub)^2)
+Cp_sub = RSS_sub + 2*4*summary(mlFull)$sigma^2
+Cp_sub
+```
+Compare their corresponding testing errors
+```{r}
+# full model
+sum((testing$price-predict(mlFull,testing))^2)/nrow(testing)
+# sub model
+sum((testing$price-predict(mlSub,testing))^2)/nrow(testing)
+```
+
+
+
+b. Use the best subset selection to obtain the best model of each model size. Perform the following:
+
+      * Report the matrix that indicates the best model with each model size. 
+      * Use the AIC and BIC criteria to compare these different models and select the best one respectively. Use a plot to intuitively demonstrate the comparison of different model sizes.
+      * Report the best model for each criteria. Are they the same? 
+      * Based on the selected variables of these two best models, calculate and report their respective prediction errors on the testing data.
+      * Which one is better? Is this what you expected? If yes, explain why you expect this to happen. If not, what could be the causes? 
+
+Matrix that indicates the best model with each model size
+```{r}
+library(leaps)
+RSSleaps = regsubsets(x = as.matrix(training[, -7]), y = training[,7])
+sumleaps =summary(RSSleaps, matrix=T)
+sumleaps$outmat
+```
+
+AIC and BIC criteria to compare these different models and select the best one respectively
+```{r}
+n = nrow(training)
+modelsize=apply(sumleaps$which,1,sum)
+AIC = n*log(sumleaps$rss/n) + 2*modelsize
+BIC = n*log(sumleaps$rss/n) + modelsize*log(n)
+cbind("BIC" = BIC,"AIC"=AIC)
+```
+
+
+```{r}
+    inrange <- function(x) { (x - min(x)) / (max(x) - min(x)) }
+    
+    BIC = inrange(BIC)
+    AIC = inrange(AIC)
+
+    plot(range(modelsize), c(0, 0.4), type="n", 
+         xlab="Model Size (with Intercept)", 
+         ylab="Model Selection Criteria", cex.lab = 1.5)
+
+    points(modelsize, AIC, col = "green4", type = "b", pch = 19)
+    points(modelsize, BIC, col = "orange", type = "b", pch = 19)
+    legend("topright", legend=c( "AIC", "BIC"),
+           col=c("green4", "orange"), 
+           lty = rep(1, 2), pch = 19, cex = 1.7)
+```
+ 
+
+Best model:
+```{r}
+model2b=lm(price~age+date+distance+stores+latitude,training)
+```
+
+Prediction errors on the testing data:
+```{r}
+sum((testing$price-predict(model2b,testing))^2)/nrow(testing)
+```
+
+   
+c. Use a step-wise regression with AIC to select the best model. Clearly state: 
+
+      * What is your initial model?
+      * What is the upper/lower limit of the model?
+      * Are you doing forward or backward? 
+    
+    Is your result the same as question b)? Provide a brief discussion about their similarity or dissimilarity and the reason for that. 
+
+```{r}
+step(lm(price~1, data=training), scope=list(upper=model2b, lower=~1),
+     direction="forward", trace = 0)
+```
+
