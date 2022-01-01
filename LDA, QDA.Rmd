@@ -1,0 +1,181 @@
+## LDA
+
+Let's start with estimating some components in the LDA. First, we know that and LDA is to compare the log of densities and the prior probabilities, i.e., for each target point $x_0$, we want to find the class label $k$ that has the largest value of 
+
+$$x_0^T \Sigma^{-1} \mu_k - \frac{1}{2} \mu_k^T \Sigma^{-1} \mu_k + \log(\pi_k)$$
+Hence, the problem is essentially estimating the quantities:
+
+  * Prior probabilities $\pi_k$
+  * Mean vectors (centroid) for each class: $\mu_k$  
+  * Pooled covariance matrix $\Sigma$ 
+  
+Let's use the `SAheart` data from the `ElemStatLearn` package to perform this calculation. In this data, there are two classes, defined by the `chd` (chronic heart disease) variable. And there are 9 variables. We will treat them all as numerical variables, hence the following $X$ and $y$ are used:
+
+```{r}
+  library(ElemStatLearn)
+  X = data.matrix(SAheart[, -10])
+  y = SAheart$chd
+```
+
+Based on this data, calculate the three components of LDA for each class.
+
+- Prior probabilities
+```{r}
+table(y)
+```
+```{r}
+# Prior probabilities of π1 = P(Y=1)
+pi_1 = 160/(302+160)
+# Prior probabilities of π0 = P(Y=0)
+pi_0 = 302/(302+160)
+```
+
+Our $π1$ is 0.346 and $π0$ is 0.654.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+```{r}
+# prepare data
+# separate data x by y label
+label0 <- rep()
+label1 <- rep()
+
+for (i in 1:length(y)){
+  if(y[i]==0){
+    label0 = label0 %>% append(i)
+  }
+  if(y[i]==1){
+    label1 = label1 %>% append(i)
+  }
+}
+
+data1 = X[label1,1:9]
+data0 = X[label0,1:9]
+```
+
+- Mean vectors (centroid) for each class
+```{r}
+# centroid of class 1
+centroid1 = matrix(colMeans(data1))
+# centroid of class 0
+centroid0 = matrix(colMeans(data0))
+```
+
+- Pooled covariance matrix
+```{r}
+sig_1 <- matrix(NA, 160, 9)
+sig_0 <- matrix(NA, 302, 9)
+
+for(i in 1:dim(data1)[1]){
+  sig_1[i,] = data1[i,]-centroid1
+}
+x_par = t(sig_1)%*%sig_1
+
+
+for(i in 1:dim(data0)[1]){
+  sig_0[i,] = data0[i,]-centroid0
+}
+y_par = t(sig_0)%*%sig_0
+
+pool_cov <- (x_par + y_par) /(dim(X)[1]-2)
+```
+
+  * After calculating these components, use your estimated values to predict the label of each observation in the training data. So this will be the in-sample fitted labels. Provide the confusion table of your results. Please be aware that some of these calculations are based on matrices, hence you must match the dimensions (construct your objects) properly, otherwise, error would occur.  
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(matlib)
+library(pracma)
+```
+
+```{r}
+arg_1 =  X %*% inv(pool_cov) %*% 
+  centroid1-as.vector(0.5*t(centroid1) %*% 
+                        inv(pool_cov) %*% centroid1) + log(pi_1)
+
+arg_0 =  X %*% inv(pool_cov) %*%
+  centroid0 - as.vector(0.5*t(centroid0) %*% 
+                          inv(pool_cov) %*% centroid0) + log(pi_0)
+
+fin_compare = data.frame(arg_0, arg_1)
+
+# add labels
+fin_compare = fin_compare %>% 
+  mutate(new_label = ifelse(arg_0>arg_1, 0, 1))
+table(fin_compare[,3], y)
+```
+  * Perform the same LDA analysis using the built in `lda` function and provide the confusion table. Are these results match?
+  
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(MASS)
+```
+```{r}
+# LDA analysis with `lda` function
+dig.lda=lda(X,y)
+Ytest.pred = predict(dig.lda, X)
+table(y, Ytest.pred$class)
+```
+The result of the built in `lda` function is the same as the one I get in previous question.
+
+
+## QDA and Marginal Screening
+
+From our lecture notes, we know that QDA does not work directly on the Hand Written Digit data. This is because the number of variables is larger than the number of observations for some class labels. Let's consider doing a small trick to this example, and see if that works. You should use the `zip.train` as the training data and `zip.test` as the testing data. 
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(ElemStatLearn)
+```
+```{r}
+# prepare data
+training =  as.data.frame(zip.train)
+testing =  as.data.frame(zip.test)
+```
+
+Instead of using all 256 variables, we will select 40 variables, and only use them to perform the QDA. The criteria for this selection is the marginal variance, meaning that we will calculate the variance of each variable in the training data, and pick the top 40 with the largest variance. 
+
+```{r}
+# get column names of the 40 largest variance
+var40 = names(sort(sapply(training[, 2:257], var), decreasing = TRUE)[1:40])
+```
+```{r}
+# select the columns
+train_40_col = training[,var40]
+test_40_col = testing[,var40]
+```
+
+Perform this analysis and report the testing data confusion table. Answer the following questions:
+
+* Does the method work? Why do you think it works/or not? 
+
+```{r}
+# build qda model
+dig.qda = qda(train_40_col,training[,1])
+Ytest.pred=predict(dig.qda, test_40_col)$class
+# testing data confusion table
+table40v = table(testing[,1], Ytest.pred)
+table40v
+```
+Yes the method works because the number of our variables is not larger than the number of observations for each of the class labels. We have 40 variables and our class labels are all greater than 100.
+
+
+  * Decrease the number of variables that you select from 40 to just 10. What is the performance compared with the 40 variable version? Why do you think this happened? 
+
+```{r}
+var10 = names(sort(sapply(training[, 2:257], var), decreasing = TRUE)[1:10])
+```
+```{r}
+train_10_col = training[,var10]
+test_10_col = testing[,var10]
+```
+
+```{r}
+dig.qda = qda(train_10_col,training[,1])
+Ytest.pred=predict(dig.qda, test_10_col)$class
+table10v = table(testing[,1], Ytest.pred)
+table10v
+```
+```{r}
+sum(diag(table40v))/sum(table40v)
+sum(diag(table10v))/sum(table10v)
+```
+The performance of model with 40 variables is better, its accuracy is 0.845 while the accuracy of model with 10 variables is 0.658. I think this might because more variables can bring us less variance(error) and lead to better predictions.   
