@@ -1,0 +1,140 @@
+## Linear SVM and support vectors
+
+Use the `Social Network Ads` data, available on Kaggle [[link](https://www.kaggle.com/rakeshrau/social-network-ads)]. The `.csv` file is also available at our course website. The goal is to classify the outcome `Purchased`, and we will only use the two continuous variables `EstimatedSalary` and `Age`. __Scale and center both covariates before you proceed with the analysis__. For this question, you should use the `e1071` package. Complete the following tasks:
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+```
+```{r, results='hide', message=FALSE, warning=FALSE}
+# prepare data
+SN_Ad = read_delim('Social_Network_Ads.csv',delim=',')
+X = SN_Ad %>% select('EstimatedSalary','Age')
+Y = SN_Ad %>% select('Purchased')
+Y$Purchased = ifelse(Y$Purchased == 0, -1, 1)
+# Scale and center
+preprocessParams <- preProcess(X, method = c("center", "scale"))
+X <- predict(preprocessParams, X) %>% as.matrix(.)
+Y <- Y %>% as.matrix(.)
+```
+  * Produce a 2d scatter plot of the data, with each observation colored by the outcome. Use `pch = 19` for the dots. 
+  
+```{r}
+plot(X,col=ifelse(Y>0,"blue","red"), pch = 19, cex = 1.2, lwd = 2, cex.lab = 1.5)
+```
+  
+  * Fit a linear SVM with `cost = 1`. Do not scale or center the data. 
+  * What is the training data (in-sample) classification error? Also provide a confusion table of the results.
+  
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(e1071)
+```
+```{r}
+svm.fit <- svm(Y ~ EstimatedSalary+Age, data = data.frame(X, Y), type='C-classification',
+               kernel='linear', scale=FALSE, cost = 1)
+```
+
+confusion table:
+```{r}
+table(svm.fit$fitted, Y)
+```
+
+classification error:
+```{r}
+(46+17)/length(Y)
+```
+
+The classification error is 0.1575.
+
+
+  * Draw the decision line on the plot. For this question, you should try to use the `coefs`, `SV` and the `rho` from the fitted object, and calculate $\boldsymbol \beta$ and $\beta_0$. Note that the decision line is $f(x) = x^T \boldsymbol \beta + \beta_0 = 0$, you calculate the decision line based on them. An example can be found in the lecture note. 
+  * Mark the support vectors on the plot (with a circle on the observation, use `cex = 2`).
+
+```{r}
+# calculate boldsymbol beta and beta_0
+b <- t(svm.fit$coefs) %*% svm.fit$SV
+b0 <- -svm.fit$rho
+
+# plot decision line and Mark the support vectors
+plot(X,col=ifelse(Y>0,"blue","red"), pch = 19, cex = 1.2, lwd = 2, 
+     cex.lab = 1.5)
+points(X[svm.fit$index, ], col="black", cex=3)   
+abline(a= -b0/b[1,2], b=-b[1,1]/b[1,2], col="black", lty=1, lwd = 2)
+    
+abline(a= (-b0-1)/b[1,2], b=-b[1,1]/b[1,2], col="black", lty=3, lwd = 2)
+abline(a= (-b0+1)/b[1,2], b=-b[1,1]/b[1,2], col="black", lty=3, lwd = 2)
+```
+
+
+## SVM for hand written digit Data
+
+Take digits 4 and 9 from `zip.train` and `zip.test` in the `ElemStatLearn` library. For this question, you should use the `kernlab` package, in combination with the `caret` package to tune the parameters. Make sure that you specify the `method` argument so that the correct package/function is used to fit the model. You may consider reading the details from [this documentation](https://topepo.github.io/caret/train-models-by-tag.html#support-vector-machines). Complete the following task. 
+
+  * Construct the training and testing data so that they become a binary classification problem.
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(ElemStatLearn)
+```
+```{r}
+# prepare data
+training = zip.train %>% 
+  subset(., .[,1] == 9|.[,1] == 4) %>%
+  as.data.frame()
+training[,1] = factor(training[,1])
+
+testing = zip.test %>% 
+  subset(., .[,1] == 9|.[,1] == 4) %>%
+  as.data.frame() 
+testing[,1] = factor(testing[,1])
+```
+
+  * Construct a grid of tuning parameters for linear SVM using the `kernlab` package, and tune this using `caret`. Use 10-fold cross-validation for this question. What is the best `C` you obtained based on the accuracy? Predict the testing data using this model and obtain the confusion table and testing data accuracy. 
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(kernlab)
+library(caret)
+```
+```{r, warning=FALSE}
+cost.grid = expand.grid(C = seq(0.01, 2, length = 10))
+train_control = trainControl(method="cv", number=10)
+  
+svm2 <- train(as.factor(V1) ~., data = training, method = "svmLinear", 
+              preProcess = c("center", "scale"),
+              trControl = train_control,  
+              tuneGrid = cost.grid)
+  
+  # see the fitted model
+svm2
+```
+
+The best `C` you I obtained from my module based on the accuracy is 0.01, where the accuracy is 0.9915144.
+
+
+```{r}
+# predict testing
+pred_svm2 = predict(svm2, testing)
+table(pred_svm2, testing[,1])
+```
+```{r}
+(193+173)/length(testing)
+```
+The best `C` is 0.01, and the testing data accuracy is 1.424125.
+
+  * Construct a grid of tuning parameters for radial Kernel SVM using the `kernlab` package, and tune this using `caret`. Use 10-fold cross-validation for this question. You may need to try this a few time to get a good range of tuning parameter. What is the best `C` and `sigma` you obtained based on the accuracy? Predict the testing data using this model and obtain the confusion table and testing data accuracy.
+  
+```{r, warning=FALSE}
+cost.grid = expand.grid(C = seq(0.01, 2, length = 10), sigma = seq(0.01, 2, length = 10))
+train_control = trainControl(method="cv", number=10)
+  
+svm3 <- train(as.factor(V1) ~., data = training, method = "svmRadial", 
+              preProcess = c("center", "scale"),
+              trControl = train_control,  
+              tuneGrid = cost.grid)
+```
+```{r}
+# predict testing data
+pred_svm3 = predict(svm3, testing)
+table(pred_svm3, testing[,1])
+```
+```{r}
+(197+165)/length(testing)
+```
+The best `C` is 1.557778 and the best `sigma` is 0.01. and the testing data accuracy is 1.40856.
