@@ -1,0 +1,225 @@
+
+## Data Preparation
+
+We will use a modified data collected from sepsis patients. The data contains 470 observations and 13 variables, which are mainly clinical variables or blood measurements. Each patient went through an active treatment or no treatment, denoted by `THERAPY`, and outcome variable we want to predict is `Health`.
+
+  * Health: Health status, the higher the better 
+  * THERAPY: 1 for active treatment, 0 for control treatment
+  * TIMFIRST: Time from first sepsis-organ fail to start drug
+  * AGE: Patient age in years
+  * BLLPLAT: Baseline local platelets
+  * blSOFA: Sum of baseline sofa score (cardiovascular, hematology, hepaticrenal, and respiration scores)
+  * BLLCREAT: Base creatinine
+  * ORGANNUM: Number of baseline organ failures
+  * PRAPACHE: Pre-infusion APACHE-II score
+  * BLGCS: Base GLASGOW coma scale score
+  * BLIL6: Baseline serum IL-6 concentration
+  * BLADL: Baseline activity of daily living score
+  * BLLBILI: Baseline local bilirubin
+
+Complete the following steps for data preparation:
+
+a. How many observations have missing values? Which variables have missing values and how many are missing?
+
+```{r}
+# import the data
+sepsis = read.csv("sepsis2.csv", row.names = 1)
+```
+```{r}
+# how many missing by row
+sum(rowSums(is.na(sepsis)))
+```
+```{r}
+# how many missing by column
+colSums(is.na(sepsis))
+```
+There are 53 observations have missing value. Variables BLLBILI has 50 missing values and BLGCS has 3 missing values.
+
+b. Use two different approaches to address the missing value issue. One of the methods you use must be the stochastic regression imputation. Make sure that when you perform the imputation, do not involve the outcome variable. Make sure that you set random seeds using your UIN. 
+  
+```{r}
+# remove outcome variable(Health)
+sepsis_no_outcome = sepsis[, -1]
+```
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(mice)
+```
+
+```{r}
+# stochastic regression imputation
+set.seed() # random seed
+imp <- mice(sepsis_no_outcome, method = "norm.nob", m = 1, maxit = 1) 
+sepsis_imp1 <- complete(imp)
+any(is.na(sepsis_imp1))
+```
+```{r}
+# Imputation with mean value 
+imp <- mice(sepsis_no_outcome, method = "mean", m = 1, maxit = 1)
+sepsis_imp2 <- complete(imp)
+any(is.na(sepsis_imp2))
+```
+
+c. Perform a linear regression on each of your imputed data. Compare the model fitting results.
+
+```{r}
+# lm of stochastic regression imputation
+c_sto_data<-cbind(sepsis$Health,sepsis_imp1)
+names(c_sto_data)[names(c_sto_data) == 'sepsis$Health'] <- 'Health'
+c_sto_lm_ml<-lm(Health~.,c_sto_data)
+```
+  
+```{r}
+# lm of Imputation with mean value 
+c_impu_data<-cbind(sepsis$Health,sepsis_imp2)
+names(c_impu_data)[names(c_impu_data) == 'sepsis$Health'] <- 'Health'
+c_impu_lm_ml<-lm(Health~.,c_impu_data)
+```
+
+Model comparison
+```{r}
+# MSE of stochastic regression imputation
+mean(summary(c_sto_lm_ml)$residuals^2)
+# MSE of Imputation with mean value 
+mean(summary(c_impu_lm_ml)$residuals^2)
+```
+
+The data that use stochastic regression imputation is better, it has smaller MSE. But the difference is slight.
+
+d. Investigate the marginal distribution of each variable (excluding the outcome `Health`) and decide whether the variable could benefit from any transformations. If so, then perform the transformation at your choice. __You need to provide clear evidence to reason your decision and also provide a table that summarizes your decisions__. Save your final data for the next question. While performing these transformations, you do not need to worry about whether they will lead to a better model fitting. There may not be a best decision, or even correct decision. Simply use your best judgement based on the marginal distributions alone. 
+
+```{r,fig.width = 10,fig.height = 10}
+par(mfrow = c(4, 3))
+  for (i in 2:ncol(c_impu_data)){
+    hist(c_impu_data[,i], main = colnames(c_impu_data)[i])
+  }
+```
+
+The variable blSOFA has long tail towards the right hand side, so I take log +1 of it, and the outcome becomes more symmetry.
+```{r,fig.height = 3}
+#more normal
+par(mfrow=c(1,2))
+hist(c_impu_data$blSOFA,main="blSOFA Before transformations")
+c_impu_data$blSOFA=log(1+c_impu_data$blSOFA)
+hist(c_impu_data$blSOFA,main="blSOFA After transformations")
+```
+The variable BLLPLAT has large outlier in the right hand side, so I use quantile transformation, and the outcome becomes more symmetry.
+```{r,fig.height = 3}
+# BLLPLAT large outlier
+par(mfrow=c(1,2))
+hist(c_impu_data$BLLPLAT,main="BLLPLAT Before transformations")
+c_impu_data$BLLPLAT=qnorm(rank(c_impu_data$BLLPLAT) / (1 + nrow(c_impu_data)))
+hist(c_impu_data$BLLPLAT,main="BLLPLAT After transformations")
+```
+The variable BLIL6 has large outlier in the right hand side, so I use quantile transformation, and the outcome becomes more symmetry.
+```{r,fig.height = 3}
+# BLLPLAT large outlier
+par(mfrow=c(1,2))
+hist(c_impu_data$BLIL6,main="BLIL6 Before transformations")
+c_impu_data$BLIL6=qnorm(rank(c_impu_data$BLIL6) / (1 + nrow(c_impu_data)))
+hist(c_impu_data$BLIL6,main="BLIL6 After transformations")
+```
+
+Since both the variable BLIL6 and variable BLLPLAT has large outlier in their right hand side, I performed quantile transformation on them. Also, because of the variable blSOFA has long tail towards the right hand side, I take log +1 of it. The outcome of these transformations all make the variable more symmetry. The following is the summarized table of the transformations. 
+
+|variable|transformed method|reason|
+|:------:|:----------------:|
+|blSOFA|take log +1|long tail in the right side|
+|BLLPLAT|quantile transformation|large outlier|
+|BLIL6|quantile transformation|large outlier|
+
+## Lasso and Elatic-Net
+
+Take the final data from your previous question, i.e., with missing data imputed and variable transformations addressed. You do not need to worry too much about whether these processes would improve the prediction error. Focus on fitting the regression models correctly for this question. 
+
+  a. Perform Lasso on your data to predict `Health`. Report the following:
+      * How many fold are you using in the cross-validation? 
+      * How did you decide which is the best tuning parameter? Please provide figures to support your answer. 
+      * What is the parameter estimates corresponding to this parameter? Is this solution sparse? Which variable is being excluded?
+      * What is the mean cross-validation error corresponding to this?
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(glmnet)
+```
+```{r}
+set.seed() # random seed
+# use 10 fold cross-validation
+lasso.fit = cv.glmnet(data.matrix(c_impu_data[, 2:13]), 
+                      c_impu_data$Health, nfolds = 10, alpha = 1)
+# plot the figure coefficient and MSE
+par(mfrow=c(1,2))
+plot(lasso.fit$glmnet.fit, "lambda")
+plot(lasso.fit)
+```
+```{r}
+# the lambda with minimum mean cross-validated error
+lasso.fit$lambda.min
+```
+```{r}
+#  calculate the mean cross-validation error
+min(lasso.fit$cvm)
+```
+```{r}
+# select the minimum lambda
+coef(lasso.fit, s = "lambda.min")
+```
+
+I use 10 fold cross-validation, by the $\lambda$ and MSE graph, we can choose lambda with the minimum mean cross validation error (lambda = 0.1414858) as our best tuning parameter.  The estimated parameter of this lambda has lots of spare solutions, all variables expect TIMFIRST are excluded. The intercept of this model is -0.1080 and the coefficient of the variable TIMFIRST is -0.0002. The mean cross-validation error is 4.2187.   
+ 
+  b. Perform Elastic-Net model on this data. Report the following:
+      * How did you choose the $\alpha$ parameter?
+      * What is the parameter estimates corresponding to the minimum cross-validation error? Is it better than Lasso?
+      * Is this solution sparse? Any variable being excluded? 
+
+```{r}
+set.seed() # random seed
+alpha_list = seq(0, 1, 0.1)
+allalpha <- matrix(NA, length(alpha_list), ncol = 2)
+
+for (i in 1:length(alpha_list)){
+  enet.fit=cv.glmnet(data.matrix(c_impu_data[, 2:13]), 
+                     c_impu_data$Health, nfolds = 10, alpha = alpha_list[i])
+  allalpha[i,2]=min(enet.fit$cvm)
+  allalpha[i,1]=alpha_list[i]
+}
+
+allalpha_data_frame=as.data.frame(allalpha)
+filter(allalpha_data_frame, allalpha_data_frame['V2'] == min(allalpha_data_frame['V2']))
+```
+To select a $\alpha$ value, I create a grid from 0 to 1, separated by 0.1. I try each of these $\alpha$ values in  a Elastic-Net model and select the $\alpha$ with the smallest mean cross validation error. The result shows when $\alpha$ equal to 0.6, we can get the smallest mean cross validation error.
+
+```{r}
+# parameter estimates corresponding to the minimum cross-validation error
+set.seed() # random seed
+enet.fit = cv.glmnet(data.matrix(c_impu_data[, 2:13]), 
+                     c_impu_data$Health, nfolds = 10, alpha = 0.6)
+
+# show parameters
+coef(enet.fit, s = "lambda.min")
+```
+```{r}
+min(lasso.fit$cvm)
+min(enet.fit$cvm)
+```
+
+The estimated parameter of this model also has lots of spare solutions, all variables expect TIMFIRST are excluded. The intercept is -0.1101 and the coefficient of the variable TIMFIRST is -0.0002. This model is slightly better than the lasso model we built previous since we have smaller mean cross-validation error.
+
+  c. Provide a discussion of the three penalized models we have learned so far: Lasso, Ridge and Elastic-Net by giving at least one advantage and one disadvantage for each of them. 
+  
+Lasso:
+
+1. (advantage) It can help us do model selecting and shrinking
+
+2. (disadvantage) Will have problem when dealing with highly correlated variables
+
+Ridge: 
+
+1. (advantage) Good at dealing with highly correlated problem
+
+2. (disadvantage) It can't select variables
+
+
+Elastic-Net:
+
+1. (advantage) It add both penalty (l1 and l2) in the loss function 
+
+2. (disadvantage) It has more tuning parameters, which cause more cost and has a risk of over fitting.
