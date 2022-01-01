@@ -166,7 +166,7 @@ The AUC is 0.8759.
 In this last part, we will use a built-in feature of the `glmnet` package. Read the documentation of the `cv.glmnet()` function at [CRAN](https://cran.r-project.org/web/packages/glmnet/glmnet.pdf) and understand how to specify the `type.measure` argument so that the cross-validation uses the AUC as the selection criterion of $\lambda$ to pick the best model. Implement a 10-fold cross-validation Ridge regression using our data and report the best $\lambda$ value (`"lambda.min"`). What is the cross-validation AUC associated with this penalty?
 
 ```{r}
-set.seed(670144148)
+set.seed() # random seed
 lasso.fit = cv.glmnet(x = data.matrix(heart[, 1:11]), 
                       y = heart[,12], nfold = 10, 
                       type.measure="auc", 
