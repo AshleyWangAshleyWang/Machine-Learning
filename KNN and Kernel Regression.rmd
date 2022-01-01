@@ -1,0 +1,167 @@
+
+## Writing your own KNN and Kernel Regression
+
+For this question, you are not allowed to use existing functions that directly calculate KNN or kernel regression, but you can still use any R function to calculate the components you need. For an example of such implementation of NW kernel regression, read the lecture note this week. The end result of this question is to write two functions: `myknn(x0, x, y, k)` and `mynw(x0, x, y, h)` that calculates the prediction of these two models at a target point `x0`, given the data vectors `x` and `y`, and the corresponding tuning parameters `k` and `h`. For `mynw()`, you should use the Gaussian kernel function. An additional requirement is that you __cannot use for-loop__ in your code. 
+
+  a) Write your own `myknn()` and `mynw()`
+  b) Test your code using the artificial data in the lecture note. Try to predict a target point at $x_0 = 2.5$. Compare your results with existing R functions `kknn()` and `locpoly()`, using `k = 10` and `h = 0.5`, respectively, make sure that your implementation is correct. For the `locpoly()` function, you may not be able to directly obtain the prediction at $x_0 = 2.5$. Hence, demonstrate your result in a figure to show that they are correct. 
+
+### a)
+
+**KNN**
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyverse)
+```
+```{r}
+myknn <- function(x0, x, y, k){
+  knn_tibble = tibble(x,y) %>% 
+    mutate(x_minus_x0 = abs(x-x0)) %>%
+    arrange(x_minus_x0) %>%
+    slice(1:k)
+  y_value = knn_tibble %>% 
+    select('y') %>%
+    colMeans(.,na.rm = TRUE)
+  return(y_value)
+}
+```
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(kknn)
+library(FNN)
+```
+
+**NW**
+```{r}
+mynw <- function(x0, x, y, h){
+  # calculate the kernel weights
+  w = dnorm( (x0 - x)/h )/h
+  # calculate the NW estimator 
+  fhat = sum(w*y)/sum(w)
+  return(fhat)
+}
+```
+
+### b) 
+
+**KNN**
+```{r}
+set.seed(670144148)
+x <- runif(40, 0, 2*pi)
+y <- 2*sin(x) + rnorm(length(x))
+test_knn = myknn(x0 = 2.5, x, y, k = 10)
+test_knn
+```
+```{r}
+# compare with r knn function
+knn.fit = kknn(y ~ ., train = data.frame(x = x, y = y), 
+                   test = data.frame(x = 2.5),
+                   k = 10, kernel = "rectangular")
+knn.fit$fitted.values
+```
+
+**NW**
+```{r}
+set.seed(670144148)
+x <- runif(40, 0, 2*pi)
+y <- 2*sin(x) + rnorm(length(x))
+test_nw = mynw(x0 = 2.5, x, y, h = 0.5)
+```
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(KernSmooth)
+```
+```{r}
+# compare with r NW function
+est <- locpoly(x, y, degree = 0, bandwidth = 0.5,
+                 kernel = "normal")
+```
+```{r}
+# plot NW result
+plot(x, y, xlim = c(0, 2*pi), xlab = "", ylab = "", cex.lab = 1.5, pch = 19)
+lines(est$x, est$y, col = "darkorange", lwd = 3)
+points(2.5,test_nw, col = "red", pch = 19, cex = 2)
+```
+
+The result of my knn function is the same with r kknn function, their predicted values are both 0.9651518. And the result of my NW function is located on the predicted line of r locpoly function, which means the two results are the same under our target value. 
+
+
+## The Bias-variance Trade-off
+
+We are going to perform a slightly more complicated simulation analysis of the bias-variance trade-off using prediction errors. Hence, you will need to utilize the functions you wrote in the previous question. We can then vary the tuning parameter $k$ or $h$ to see how they changes. Following the idea of simulation studies in previous HW assignments, setup a simulation study. Complete this question by performing the following steps. Note that you would have a triple-loop to complete this question, the first loop for $k$ and $h$, the second loop for repeating the simulation `nsim` times, and the third loop for going through all testing points. 
+
+  * Generate data using the same model in the previous question
+  * Generate 100 random testing points uniformly within the range of $[0, 2\pi]$ and also generate their outcomes.
+  * For each testing point, calculate both the $k$NN and kernel predictions using your own functions, with a given $k$ and $h$
+  * Summarize your model fitting results by calculating the mean squared prediction error
+  * (the second loop) Run this simulation `nsim` $= 200$ times to obtain the averaged prediction errors.
+  * (the first loop) Vary your $k$ from 1 to 20, and vary your $h$ in `seq(0.1, 1, length.out = 20)`. Since both have length 20, you could write them in the same loop. 
+
+```{r}
+# Generate data
+set.seed(670144148)
+x <- runif(40, 0, 2*pi)
+y <- 2*sin(x) + rnorm(length(x))
+
+# Generate test data
+testx <- runif(100, 0, 2*pi)
+testy <- 2*sin(testx) + rnorm(length(testx))
+# setting
+nsim = 200
+k_h = seq(0.1, 1, length.out = 20)
+
+err_nw_each = rep(NA,length(testx))
+err_knn_each = rep(NA,length(testx))
+err_nw_mean = rep(NA,nsim)
+err_knn_mean = rep(NA,nsim)
+i.error_knn = rep(NA,length(k_h))
+i.error_nw = rep(NA,length(k_h))
+
+for (i in 1:length(k_h)){
+  for(j in 1:nsim){
+    # Generate testing point
+    testx = runif(100, 0, 2*pi)
+    testy <- 2*sin(testx) + rnorm(length(testx))
+    for(z in 1:length(testx)){
+      nsim_nw = mynw(x0 = testx[z], x, y, h = k_h[i])
+      nsim_knn = myknn(x0 = testx[z], x, y, k = i)
+      err_nw_each[z] = (testy[z] - nsim_nw)^2
+      err_knn_each[z] = (testy[z] - nsim_knn)^2
+    }
+    err_nw_mean[j] = mean(err_nw_each)
+    err_knn_mean[j] = mean(err_knn_each)
+  }
+  i.error_knn[i]=mean(err_knn_mean)
+  i.error_nw[i]=mean(err_nw_mean)
+}
+```
+```{r}
+result <- tibble(k = 1:20, knn_error = i.error_knn,
+                 h = k_h, nw_error = i.error_nw)
+```
+
+After obtaining the simulation results, provide a figure to demonstrate the bias-variance trade-off. What are the optimal $k$ and $h$ values based on your simulation? What kind of values of $k$ or $h$ would have large bias and small variance? And what kind of values would give small bias and large variance?
+
+```{r}
+par(mfrow=c(1,2))
+plot(result$h, result$nw_error,
+     type='l',xlab='k', ylab='mean prediction error', 
+     main='nw', col='darkorange', lwd = 2)
+plot(result$k, result$knn_error,
+     type='l',xlab='h', ylab='mean prediction error',
+     main='knn', col='darkorange', lwd = 2)
+```
+
+```{r}
+result %>% 
+  select(c('h','nw_error')) %>%
+  filter(nw_error == min(nw_error))
+```
+```{r}
+result %>% 
+  select(c('k','knn_error')) %>%
+  filter(knn_error == min(knn_error))
+```
+The optimal k for knn model is when k equals to 5 and the optimal h for nw model is when h equals to 0.479, which gives us the smallest prediction error. 
+
+As for the bias variance trade off, we can see the prediction error of both knn and nw decrease when k/ h increase in the beginning, which means we have large variance and small bias, so variance decreases faster than bias increases. 
+
+In contrast, prediction error of both knn and nw increase when k/ h increase in the end of the plot, it means we smaller variance and larger bias, so bias increase faster than variance decreases.
