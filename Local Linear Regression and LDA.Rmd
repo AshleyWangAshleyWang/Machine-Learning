@@ -1,0 +1,345 @@
+# Question 1  Local Linear Regression
+
+In this question, we will investigate a local linear regression:
+$$
+\widehat{f}\left(x\right)=\widehat{\beta}_{0}\left(x\right)+ \widehat{\beta}_{1}\left(x\right) x,
+$$
+where $x$ is a testing point. Local coefficients $\widehat{\beta}_{r}\left(x \right)$ for $r=0, 1$ are obtained by minimizing the object function
+$$
+\underset{\beta_{0}(x), \, \beta_{1}(x)}{\operatorname{minimize}} \quad \sum_{i=1}^{n} K_{\lambda} \left(x, x_{i}\right) \Big[y_{i}-\beta_{0}(x) - \beta_1(x) x_{i} \Big]^{2}.
+$$
+
+In this question, we will use the Gaussian kernel $K(u) = \frac{1}{\sqrt{2 \pi}} e^{- \frac{u^2}{2}}$.
+
+a) Write a function `myLocLinear(trainX, trainY, testX, lambda)`, where `lambda` is the bandwidth and `testX` is all testing samples. This function returns predictions on `testX`. The solution of $\beta_{0}(x)$ and $\beta_{1}(x)$ can be obtained by fitting a weighted linear regression. The formula is provided on Page 25 of our [lecture note](https://teazrq.github.io/stat542/notes/Kernel.pdf). 
+
+```{r}
+# Gaussian kernel
+Gaussian.kernel = function(x, x_i, lambda){
+  u = (x-x_i)/lambda
+  return(exp((-(u)^2)/2)/sqrt(2*pi))
+}
+```
+```{r}
+myLocLinear = function(trainX, trainY, testX, lambda){
+  
+  pred.test = rep(NA, length(testX))
+  
+  for(i in 1:length(testX)){
+    weight = Gaussian.kernel(testX[i], trainX, lambda)
+  
+    w <-matrix(0,ncol=length(trainX), nrow=length(trainX))
+    diag(w)<-weight
+  
+    b.hat = solve(t(cbind(1,trainX))%*%w%*%cbind(1,trainX))%*%t(cbind(1,trainX))%*%w%*%trainY
+    pred.test[i] = cbind(1,testX[i])%*%b.hat
+  }
+
+  return(pred.test)
+}
+```
+
+
+b) Fit a local linear regression with our given training data. The testing data are generated using the code given below. Try a set of bandwidth  $\lambda = 0.05, 0.1, \ldots, 0.55, 0.6$ when calculating the kernel function. 
+  - Provide a plot of testing MSE vs $\lambda$. Does your plot show a "U" shape?
+
+```{r}
+  train = read.csv('hw7_Q1_train.csv')
+  testX = 2 * pi * seq(0, 1, by = 0.01)
+  testY = sin(testX)
+  plot(train$x, train$y, pch = 19, cex = 0.3, xlab = "x", ylab = "y")
+  lines(testX, testY, col = "darkorange", lwd=2.0)
+  legend("topright", legend = c("Truth"), 
+         col = c("darkorange"), lty = 1, cex = 2)
+```
+
+```{r}
+lamda.seq = seq(0.05,0.6,0.05)
+mse.seq = rep(NA, length(lamda.seq))
+
+for(i in 1:length(lamda.seq)){
+  test.pred = myLocLinear(train$x, train$y, testX, lambda = lamda.seq[i])
+  mse.seq[i] = mean((testY - test.pred)^2)
+}
+```
+```{r}
+# plot 
+plot(lamda.seq, mse.seq, xlab = "lambda", ylab = "MSE", type = "b",
+     pch = 19, col = "darkorange")
+```
+
+-  The plot definitely looks like a U shape.
+
+- Report the best testing MSE with the corresponding $\lambda$.\
+
+```{r}
+# report best lambda
+tibble(lamda.seq, mse.seq)%>% arrange(mse.seq) %>% slice(1)
+```
+
+- The best testing MSE is 0.00157536 when $\lambda$ equals 0.25.
+
+  - Plot three figures of your fitted testing data curve, with $\lambda = 0.05, 0.25$, and $0.5$. Add the true function curve (see the following code for generating the truth) and the training data points onto this plot. Label each $\lambda$ and your curves. Comment on the the shape of fitted curves as your $\lambda$ changes. 
+
+```{r}
+# plot with lambda = 0.05, 0.25, and 0.5$
+par(mfrow=c(1,3))
+fitting.plot = function(train.d, test.x, test.y, lambda){
+  plot(train.d$x, train.d$y, pch = 19, cex = 0.3, xlab = "x", ylab = "y")
+  lines(test.x, test.y, col = "darkorange", lwd=2.0)
+  
+  test.pred = myLocLinear(train.d$x, train.d$y, test.x, lambda = lambda)
+  
+  lines(test.x, test.pred, col = "darkblue", lwd=2.0)
+  
+  title(lambda)
+}
+
+fitting.plot(train, testX, testY, 0.05)
+fitting.plot(train, testX, testY, 0.25)
+fitting.plot(train, testX, testY, 0.5)
+
+```
+
+-  The shape become more smooth as $\lambda$ increase.
+
+# Question 2 Linear Discriminant Analysis
+
+For both question 2 and 3, you need to write your own code. We will use the handwritten digit recognition data from the `ElemStatLearn` package. We only consider the train-test split, with the pre-defined `zip.train` and `zip.test`. Simply use `zip.train` as the training data, and `zip.test` as the testing data for all evaluations and tuning. No cross-validation is needed in the training process.
+
+  - The data consists of 10 classes: digits 0 to 9 and 256 features ($16 \times 16$ grayscale image). 
+  - More information can be attained by code `help(zip.train)`.
+
+```{r, message=FALSE, warning=FALSE}
+library(ElemStatLearn)
+```
+```{r}
+# load training and testing data
+dim(zip.train)
+dim(zip.test)
+  
+train = data.frame(zip.train)
+test = data.frame(zip.test)
+train$X1 = factor(train$X1) 
+test$X1 = factor(test$X1) 
+  
+# number of each digit
+table(zip.train[, 1])
+```
+
+```{r}
+group <- lapply(unique(train[,1]), function(x) train[train$X1==x,])
+counts <- unlist(lapply(group, function(x) dim(x)[1]))
+```
+
+  a. [10 pts] Estimate the mean, covariance matrix of each class and pooled covariance matrix. Basic built-in R functions such as `cov` are allowed. Do NOT print your results. 
+  
+```{r}
+# initial
+k = unique(train[, 1])
+N = nrow(train)
+p = ncol(train)
+
+# mean
+mean.matrix = data.frame(matrix(nrow = p-1, ncol = 0))
+pool.sum = data.frame(matrix(nrow = ncol(train)-1, ncol = ncol(train)-1, 0))
+sigma.list = list()
+
+
+for(i in 0:(length(k)-1)){
+  class = train %>% filter(X1 ==i) %>% dplyr::select(!X1)
+  
+  # calculate mean
+  mu = colMeans(class)
+  mean.matrix = cbind(mean.matrix, mu)
+  
+  # calculate covariance matrix
+  x.diff = sweep(class, 2, mu, '-')
+  cov.matrix = as.matrix(t(x.diff)) %*% as.matrix(x.diff)
+  
+  # calculate pooled sum
+  pool.sum = pool.sum + cov.matrix
+  
+  # calculate sigma list for each k
+  sigma.list[[i+1]]= cov.matrix*(1/(nrow(class)-1))
+  }
+
+# calculate pooled covariance matrix
+pool.cov = pool.sum/ (N-length(k))
+```
+
+  b. Write your own linear discriminate analysis (LDA) code following our lecture note. To perform this, you should calculate $\mu_k$, $\pi_k$, and $\Sigma$ from the data. You may consider saving $\mu_k$'s and $\pi_k$'s as a list (with 10 elements in each list). 
+
+You are not required to write a single function to perform LDA, but you could consider defining a function as `myLDA(testX, mu_list, sigma_pool)`, where `mu_list` is the estimated mean vector for each class, and `sigma_pool` is the pooled variance estimation. This function should return the predicted class based on comparing __discriminant functions__  $\delta_k(x) = w_k^T x + b_k$ given on page 32 of the [lecture note](https://teazrq.github.io/stat542/notes/Class.pdf).
+
+```{r}
+pi.k = as.numeric((table(train$X1))/N)
+k.names =  names(table(train$X1))  
+```
+```{r}
+myLDA = function(testX, testY, mu_list, pi_k, sigma_pool){
+  
+  pred.class = rep(NA, nrow(testX))
+  b.class = rep(NA, length(pi_k))
+  ws = data.frame(matrix(nrow = ncol(testX), ncol = 0))
+  
+  for(j in 1:nrow(testX)){
+    
+    score = NULL
+     # calculate b and w for each class
+    for(i in 1: ncol(mu_list)){
+      
+      b = -0.5*t(mu_list[,i])%*%solve(sigma_pool)%*%mu_list[,i]+log(pi_k[i])
+      w = solve(sigma_pool)%*%mu_list[,i] #256*1
+      
+      score[i] = as.matrix(testX[j,])%*%w+b
+      
+      b.class[i] = b
+      ws = cbind(ws,w)
+    }
+    
+    pred.class[j] = which.max(score)-1 
+  }
+  
+  # the function return preducted class, b for each digit and w
+  return(list(pred.class = pred.class, b.class = b.class, ws = ws))
+}
+```
+
+
+ c. Fit LDA model on the training data and predict with the testing data. 
+  - Report the first 5 entries of the $w$ coefficient vector and $b$ for digit `0`.
+  - Report a $10 \times 10$ confusion matrix, where each **column** is true digit and each **row** is your predicted digit. You can use the `table()` function in R.
+  - Report a table of misclassification rate of each (true) digit. Hence, this is the $1 -$ sensitivity of each digit in a multi-class problem. Only keep the first three digits after the decimal point for the rate. Also report the overall mis-classification rate. 
+
+
+```{r}
+# fit testing set with model trained on traning set 
+fit <- myLDA(testX = test[,-1], mu_list = mean.matrix, pi_k = pi.k, sigma_pool = pool.cov)
+```
+
+Report the first 5 entries of the $w$ coefficient vector.
+
+```{r}
+fit$ws[1:5,1]
+```
+
+- The first 5 entries of the $w$ coefficient vector are -549.553021, 68.575047, -39.112632, -3.095659 and -9.656750.
+
+Report $b$ for digit `0`.
+
+```{r}
+fit$b.class[1]
+```
+
+- $b$ for digit `0` is -1156.443.
+
+Report a 10*10 confusion matrix and a table of misclassification rate of each (true) digit
+
+```{r, message=FALSE, warning=FALSE}
+library(shipunov)
+```
+```{r}
+Misclass(fit$pred.class, test[,1])
+```
+
+
+- The 10*10 confusion matrix and the misclassification rate table are as above. The overall mis-classification rate is 12.5%.
+
+## Question 3 Regularized quadratic discriminate analysis
+
+QDA uses a quadratic discriminant function. However, QDA does not work directly in this example because we do not have enough samples to provide an invertible sample covariance matrix for each digit. An alternative idea to fix this issue is to consider a regularized QDA method, which uses 
+$$\widehat \Sigma_k(\alpha) = \alpha \widehat \Sigma_k + (1-\alpha) \widehat \Sigma $$
+instead of $\Sigma_k$. Then, they are used in the decision rules given in page 36 of lecture notes. Complete the following questions
+
+  a. Write your own function `myRQDA(testX, mu_list, sigma_list, sigma_pool, alpha)`, where `allpha` is a scaler `alpha` and `testX` is your testing covariate matrix. And you may need a new `sigma_list` for all the $\Sigma_k$. This function should return a vector of predicted digits.
+
+```{r}
+myRQDA <- function(testX, mu_list, sigma_list, sigma_pool, alpha, pi_list){
+    
+  # initial
+  pred.class = rep(NA, nrow(testX))
+  
+  sigma_alpha <- list()
+  w_k = list()
+  b_k = rep(NA, length(pi_list))
+  W_k <- list()
+    
+    
+    for(k in 1:length(pi_list)){
+      
+      # calculate weighted sigma_alpha, dimension: 256*256 each
+      sigma_alpha[[k]] <- alpha*(1/(counts[k]-1))*sigma_list[[k]] + (1-alpha)*sigma_pool
+      
+      # caculate upper W, dimension: (256*256)
+      W_k[[k]] <- -0.5*solve(sigma_alpha[[k]])
+      
+      # calculate wks, bk and Wk for each class
+      w_k[[k]] <- as.matrix(solve(sigma_alpha[[k]])) %*% mu_list[,k]
+      
+      # calculate b, dimension: (1*256)(256*256)(256*1)
+      b_k[k] <- log(pi_list[k]) -0.5*t(as.matrix(mu_list[,k])) %*%
+        as.matrix(solve(sigma_alpha[[k]])) %*% 
+        as.matrix(mu_list[,k])- 0.5*log(det(as.matrix(sigma_alpha[[k]])))
+    }
+    
+    # predict for test
+    for(i in 1:nrow(testX)){
+      
+        # initial
+        score <- rep(NA, length(pi_list))
+        x.Wk.x = rep(NA, length(pi_list))
+        wk.x = rep(NA, length(pi_list))
+        
+      for(k in 1:length(pi_list)){
+        
+        # create quadratic term 
+        # dimension: (1*256)(256*256)(256*1)
+        x.Wk.x[k] <- as.matrix(testX[i,]) %*% W_k[[k]] %*% t(testX[i,])
+        
+        # create linear term 
+        wk.x[k] <- as.matrix(testX[i,]) %*% as.matrix(w_k[[k]])
+        
+        # calculate value of each k
+        score[k] <- x.Wk.x[k]+ wk.x[k] + as.matrix(b_k[k])
+      }
+        
+     pred.class[i] <- which.max(score)-1
+    }
+    
+    # select the largest one to be the class
+    return(pred.class)
+}
+
+```
+
+  b. Perform regularized QDA with the following sequence of $\alpha$ values. Plot the testing error (misclassification rate) against alpha. Report the minimum testing error and the corresponding $\alpha$.
+
+```{r}
+alpha_all = seq(0, 0.3, by = 0.05)
+```
+```{r}
+test$X1 <- factor(test$X1)
+test.err = rep(NA, length(alpha_all))
+
+for(i in 1:length(alpha_all)){
+   pred.RQDA = myRQDA(testX = test[,-1], mu_list = mean.matrix, 
+                   sigma_list = cov_list, sigma_pool = pool.cov, 
+                   alpha = alpha_all[i] , pi_list = pi.k)
+    test.err[i] = mean(pred.RQDA!=test$X1)
+
+    }
+```
+
+
+Plot the testing error (misclassification rate) against alpha
+```{r}
+# plot 
+plot(alpha_all, test.err, xlab = "alpha", ylab = "misclassification rate", type = "b",
+     pch = 19, col = "darkorange")
+```
+
+Report the minimum testing error and the corresponding $\alpha$
+```{r}
+tibble(alpha_all,test.err) %>% arrange(test.err) %>% slice(1)
+```
