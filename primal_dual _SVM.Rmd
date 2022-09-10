@@ -1,0 +1,437 @@
+We will code both the primal and dual form of SVM and utilize a general quadratic programming (`quadprog` package) solve to help us obtain the solution. 
+
+# Question 1 Sovling SVM using Quadratic Programming
+
+Install the `quadprog` package. The same package is also available in Python. However, make sure to read their documentations carefully. We will utilize the function `solve.QP` to solve SVM. This function is trying to perform the minimization problem:
+\begin{align}
+\text{minimize} & \quad \frac{1}{2} b^T \mathbf{D} b - d^T b, \nonumber \\
+\text{subject to} & \quad \mathbf{A}^T b \geq b_0, \nonumber
+\end{align}
+where $b$ is the unknown parameter. For more details, read the documentation of the \texttt{quadprog} package on CRAN. Use our the provided training data. This is a linearly separable problem. 
+
+```{r fig.width=6, fig.height=6, out.width = '50%', fig.align = "center"}
+  # this is how I generate the data
+  # set.seed(3)
+  # n = 30
+  # p = 2
+  # xpos = matrix(rnorm(n*p, mean=0, sd=1), n, p)
+  # xneg = matrix(rnorm(n*p, mean=3, sd=1), n, p)
+  # x = rbind(xpos, xneg)
+  # y = matrix(c(rep(1, n), rep(-1, n)))
+  # 
+  # train = data.frame(x1 = x[, 1], x2 = x[, 2], y = y)
+  # write.csv(train, "SVM-Q1.csv", row.names = FALSE)
+
+  train = read.csv("SVM-Q1.csv")
+  x = as.matrix(train[, 1:2])
+  y = train[, 3]
+  
+  plot(x, col=ifelse(y>0,"darkorange", "deepskyblue"), pch = 19, xlab = "x1", ylab = "x2")
+  legend("topleft", c("Positive","Negative"), col=c("darkorange", "deepskyblue"), 
+         pch=c(19, 19), text.col=c("darkorange", "deepskyblue"))
+```      
+
+## a) [25 points] The Primal Form
+
+Use the formulation defined on page 13 of the `SVM` lecture note. The primal problem is 
+
+$$
+\begin{aligned}
+\quad \underset{\beta_{0}, \boldsymbol{\beta}}{\text{minimize}} &\quad  \frac{1}{2} \|\boldsymbol{\beta}\|^{2} \\
+\text{subject to} &\quad y_{i}\left(x_{i}^{\top} \boldsymbol{\beta}+\beta_{0}\right) \geq 1, \,\, \text{for} \,\, i=1, \ldots, n
+\end{aligned}
+$$
+
+Perform the following:
+
+  * Let $b = (\beta_0, \boldsymbol \beta)$ in the `solve.QP()` function. Properly define $\mathbf{D}$, $d$, $\mathbf{A}$ and $b_0$ corresponding to this $b$ for the linearly separable SVM primal problem.
+  * Calculate the decision function by solving this optimization problem with the `solve.QP()` function.
+  * Report our $\beta_0$ and $\boldsymbol \beta$
+  * Plot the decision line on top the previous training data scatter plot. Include the two margin lines. Clearly mark the support vectors. 
+
+__Note__: The package requires $\mathbf{D}$ to be positive definite, while it is not true in our case. To address this problem, __add $10^{-10}$ to the top-left element__ of your $\mathbf{D}$ matrix, which is the one corresponding to $\beta_0$. This will make $\mathbf{D}$ invertible. This may affect your results slightly. So be careful when plotting your support vectors. 
+
+
+```{r, message=FALSE, warning=FALSE}
+library(quadprog)
+library(tidyverse)
+library(dplyr)
+```
+```{r}
+# define D
+D = diag(3)
+D[1,1] = 10^(-10)
+
+# define d
+d = rep(0, 3)
+
+# define b0
+b0 = rep(1,60)
+
+# define A
+A = cbind(y,x*y)
+```
+```{r}
+# Calculate the decision function
+betas = solve.QP(Dmat = D, dvec = d, Amat = t(A), bvec = b0)$solution
+
+# get the index of support vectors
+sv = solve.QP(Dmat = D, dvec = d, Amat = t(A), bvec = b0)$iact
+```
+```{r}
+# get beta0 and beta1
+beta0 = betas[1]
+beta1 = betas[2:3]
+```
+```{r}
+beta0
+beta1
+```
+
+My $\beta_0$ is 3.419238 and $\boldsymbol \beta$ is [-1.0457306, -0.9990794]
+
+```{r}
+# Plot decision line on top of training data scatter plot
+plot(x, col=ifelse(y>0,"darkorange", "deepskyblue"), pch = 19, xlab = "x1", ylab = "x2")
+  legend("topleft", c("Positive","Negative"), col=c("darkorange", "deepskyblue"), 
+         pch=c(19, 19), text.col=c("darkorange", "deepskyblue"))
+
+# abline(intercept, slope)
+abline(-beta0/beta1[2], -beta1[1]/beta1[2])
+abline(-(beta0 - 1)/beta1[2], -beta1[1]/beta1[2], lty=3)
+abline(-(beta0 + 1)/beta1[2], -beta1[1]/beta1[2], lty=3)
+
+# plot support vector
+points(x[sv, ], col="black", cex=3)
+```
+
+
+## b) The Dual Form
+
+Formulate the SVM __dual__ problem on page 21 the lecture note. The dual problem is 
+
+$$
+\begin{aligned}
+\underset{\boldsymbol \alpha}{\text{maximize}} & \quad \sum_{i=1}^{n} \alpha_{i}-\frac{1}{2} \sum_{i, j=1}^{n} y_{i} y_{j} \alpha_{i} \alpha_{j} x_{i}^{\top} x_{j} \\
+\text{subject to} & \quad \alpha_{i} \geq 0, \,\, \text{for} \,\, i=1, \ldots, n \\
+\text{and} & \quad \sum_{i=1}^{n} \alpha_{i} y_{i}=0
+\end{aligned}
+$$
+
+Perform the following:
+
+  * Let $b = (\alpha_1, \ldots, \alpha_n)^T$. Then properly define $\mathbf{D}$, $d$, $\mathbf{A}$ and $b_0$ corresponding to this $b$ for our SVM problem.
+  * Note: Equality constrains can be addressed using the `meq` argument.
+  * Obtain the solution using the `solve.QP()` function, and convert the solution into $\boldsymbol \beta$ and $\beta_0$. 
+  
+You need to report
+  * A table including $\beta_0, \beta_1, \beta_2)$ of both Q1a and Q1b. Only keep first three digits after the decimal point.
+  * Plot the decision line on top of our scatter plot. Include the two margin lines. Clearly mark the support vectors. 
+  * Report the $\ell_1$ norm of $\beta_{Q1a} - \beta_{Q1b}$, where $\beta_{Q1a}$ and $\beta_{Q2b}$ are the 3-dimensional solution obtained in Q1a and Q1b, respectively.
+
+__Note__: Again, $\mathbf{D}$ may not be positive definite. This time, add $10^{-10}$ to all diagonal elements to $\mathbf{D}$. This may affect your results slightly. So be careful when plotting your support vectors. 
+
+```{r}
+# change data form to matrix
+x = as.matrix(train[,1:2])
+y = as.matrix(train[,3])
+```
+```{r}
+# Grab information from the question
+n = nrow(x)
+p = 2
+```
+```{r}
+# define A
+## the constrain can be considered only alpha_i >= 0, i from 1...n
+A = rbind(t(y), diag(1, nrow=n))
+
+# define b0
+b0 = matrix(0, nrow=61, ncol=1)
+
+# define d
+d = matrix(1, nrow=n, ncol = 1)
+
+# define D
+D <- diag(0, nrow(x))
+for(i in 1: nrow(x)){
+  for(j in 1:nrow(y)){
+    D[i,j] <- y[i] * y[j] * (x[i,] %*% x[j,])
+  }
+}
+diag(D) = diag(D)+ 10^(-10)
+
+```
+```{r}
+# Calculate the decision function
+alphas <- solve.QP(Dmat = D, dvec = d, Amat = t(A), meq=1)$solution
+
+# get the index of support vectors
+sv.2 = which(alphas > 10^-2)
+
+```
+```{r}
+beta1.2 = colSums(drop(alphas*y)*x)
+beta0.2 <- -(max(x[y == -1, ] %*% as.matrix(beta1.2)) + min(x[y == 1, ] %*% as.matrix(beta1.2)))/2
+```
+```{r}
+# Plot decision line on top of training data scatter plot
+plot(x, col=ifelse(y>0,"darkorange", "deepskyblue"), pch = 19, xlab = "x1", ylab = "x2")
+  legend("topleft", c("Positive","Negative"), col=c("darkorange", "deepskyblue"), 
+         pch=c(19, 19), text.col=c("darkorange", "deepskyblue"))
+
+# abline(intercept, slope)
+abline(-beta0.2/beta1.2[2], -beta1.2[1]/beta1.2[2])
+abline(-(beta0.2 - 1)/beta1.2[2], -beta1.2[1]/beta1.2[2], lty=3)
+abline(-(beta0.2 + 1)/beta1.2[2], -beta1.2[1]/beta1.2[2], lty=3)
+
+# plot support vector
+points(x[sv.2, ], col="black", cex=3)
+```
+
+Report a table including $\beta_0, \beta_1, \beta_2)$ of both Q1a and Q1b.
+```{r}
+report.q1q2 = data.frame(round(c(beta0, beta1),3), round(c(beta0.2, beta1.2),3)) 
+colnames(report.q1q2) = c("Q1a (Primal Form)", "Q1b (Dual Form)")
+rownames(report.q1q2) <- paste0("beta", 0:2)
+report.q1q2
+```
+
+Report L1 norm of $\beta_{Q1a} - \beta_{Q1b}$
+```{r}
+norm(as.matrix(report.q1q2[,1]-report.q1q2[,2]))
+```
+
+- The $\ell_1$ norm of $\beta_{Q1a} - \beta_{Q1b}$ is 0.
+
+
+
+# Question 2 Linearly nonseparable SVM
+
+In this question, we will follow the formulation in Page 30 to solve a linearly nonseparable SVM. The dual problem is given by 
+
+$$
+\begin{aligned}
+\underset{\boldsymbol \alpha}{\text{maximize}} & \quad \sum_{i=1}^{n} \alpha_{i}-\frac{1}{2} \sum_{i, j=1}^{n} y_{i} y_{j} \alpha_{i} \alpha_{j} x_{i}^{\top} x_{j} \\
+\text{subject to} & \quad 0 \leq \alpha_{i} \leq C, \,\, \text{for} \,\, i=1, \ldots, n \\
+\text{and} & \quad \sum_{i=1}^{n} \alpha_{i} y_{i}=0
+\end{aligned}
+$$
+
+Perform the following:
+
+  * Let $b = (\alpha_1, \ldots, \alpha_n)^T$. Then properly define $\mathbf{D}$, $d$, $\mathbf{A}$ and $b_0$ corresponding to this $b$ for this problem. Use $C = 1$ as the penalty team. 
+  * Note: Equality constrains can be addressed using the `meq` argument.
+  * Obtain the solution using the `solve.QP()` function, and convert the solution into $\boldsymbol \beta$ and $\beta_0$. Note: 
+    + use the information provided on page 32 to obtain the support vectors and $\beta_0$. 
+    + Your solution may encounter numerical errors, e.g., very small negative $\alpha$ values, or values very close to $C$. You could consider thresholding them to exactly 0 or $C$
+    + Your $\mathbf{D}$ may not be definite positive, so consider adding $10^{-10}$ to its diagonal elements. 
+
+```{r class.source="solution"}
+  # set.seed(20)
+  # n = 200 # number of data points for each class
+  # p = 2 # dimension
+
+  # Generate the positive and negative examples
+  # xpos <- matrix(rnorm(n*p,mean=0,sd=1),n,p)
+  # xneg <- matrix(rnorm(n*p,mean=1.5,sd=1),n,p)
+  # x <- rbind(xpos,xneg)
+  # y <- c(rep(-1, n), rep(1, n))
+  # train = data.frame(x1 = x[, 1], x2 = x[, 2], y = y)
+  # write.csv(train, "SVM-Q2.csv", row.names = FALSE)
+
+  train = read.csv("SVM-Q2.csv")
+  x = as.matrix(train[, 1:2])
+  y = as.matrix(train[, 3])
+  
+  set.seed(20)
+  n = 200 # number of data points for each class
+  p = 2 # dimension
+
+  # Generate the positive and negative examples
+  xpos <- matrix(rnorm(n*p,mean=0,sd=1),n,p)
+  xneg <- matrix(rnorm(n*p,mean=1.5,sd=1),n,p)
+  x <- rbind(xpos,xneg)
+  y <- c(rep(-1, n), rep(1, n))
+  
+  
+  plot(x, col=ifelse(y>0,"darkorange", "deepskyblue"), pch = 19, xlab = "x1", ylab = "x2")
+  legend("topleft", c("Positive","Negative"), col=c("darkorange", "deepskyblue"), 
+         pch=c(19, 19), text.col=c("darkorange", "deepskyblue"))
+```
+```{r}
+n = 400
+p = 2
+```
+```{r}
+# define D
+D <- diag(0, nrow(x))
+for(i in 1: nrow(x)){
+  for(j in 1:length(y)){
+    D[i,j] <- y[i] * y[j] * (x[i,] %*% x[j,])
+  }
+}
+diag(D) = diag(D)+ 10^(-10)
+
+# define d
+d = matrix(1, nrow=n)
+
+# define A
+A = rbind(t(y), diag(nrow=n),diag(x = -1, nrow = n))
+
+# define b0
+C = -1
+b0 = rbind(matrix(0, nrow= n +1, ncol=1),matrix(C, nrow=n, ncol=1))
+```
+```{r}
+# Calculate the decision function
+alphas <- solve.QP(Dmat = D, dvec = d, Amat = t(A), bvec = b0, meq=1)$solution
+```
+```{r}
+# get the index of support vectors
+xi = ifelse(abs(alphas - 1) < 10e-3, 1, alphas)
+xi = ifelse(abs(xi) < 10e-3, 0, xi)
+sv.3 = which(xi > 0 & xi < 1)
+```
+```{r}
+# calculate beta
+beta1.3 = colSums(drop(alphas*y)*x)
+beta0.3 <- - (x[sv.3[1],]%*%beta1.3 + (x[sv.3[2],]%*%beta1.3 + x[sv.3[3],]%*%beta1.3)/2)/2
+```
+```{r}
+beta0.3
+beta1.3
+```
+
+*ANS: *My $\beta_0$ is -1.716562 and $\boldsymbol \beta$ is [1.151883, 1.111378]
+
+```{r}
+# prediction and misclassifiation rate
+pred = sign(cbind(1, x) %*% t(cbind(beta0.3,t(beta1.3))))
+mean(pred != y)
+```
+
+-  My mis-classification rate on training data is 0.145
+
+```{r}
+# Plot decision line on top of training data scatter plot
+plot(x, col=ifelse(y>0,"darkorange", "deepskyblue"), pch = 19, xlab = "x1", ylab = "x2")
+  legend("topleft", c("Positive","Negative"), col=c("darkorange", "deepskyblue"), 
+         pch=c(19, 19), text.col=c("darkorange", "deepskyblue"))
+
+# abline(intercept, slope)
+abline(-beta0.3/beta1.3[2], - beta1.3[1]/beta1.3[2])
+abline(-(beta0.3 - 1)/beta1.3[2], -beta1.3[1]/beta1.3[2], lty=3)
+abline(-(beta0.3 + 1)/beta1.3[2], -beta1.3[1]/beta1.3[2], lty=3)
+
+# plot support vector
+points(x[sv.3, ], col="black", cex=3)
+```
+
+# Question 3 Penalized Loss Linear SVM
+
+We can also perform linear and nonlinear classification using the penalized loss framework. In this question, we will only use the linear version. Use the same dataset in Question 2. Consider the following logistic loss function:
+
+$$L(y, f(x)) = \log(1 + e^{- y f(x)}).$$
+The rest of the job is to solve this optimization problem if given the functional form of $f(x)$. To do this, we will utilize the general-purpose optimization package/function. For example, in `R`, you can use the `optim()` function. Read the documentation of this function (or equivalent ones in Python) and set up the objective function properly to solve for the parameters. If you need an example of how to use the `optim()` function, read the corresponding part in the example file provided on our course website [here](https://teazrq.github.io/stat542/other/r-intro.html) (Section 10).
+
+We let $f(x)$ is to be a linear function, SVM can be solved by optimizing a penalized loss:
+$$ \underset{\beta_0, \boldsymbol\beta}{\arg\min} \quad \sum_{i=1}^n L(y_i, \beta_0 + x_i^T \boldsymbol\beta) + \lambda \lVert \beta \rVert^2$$
+You should use the data from Question 2, and answer these questions:
+  
+  * [10 pts] Drive the gradient of this penalized loss function, typeset with LaTex. 
+  
+$$ \frac{\partial L}{\partial \beta_0} = \sum_{i=1}^n \frac{-y_i e^{- y_i (\beta_0+x_i^T\beta)}}{1+e^{- y_i (\beta_0+x_i^T\beta)}} =  \sum_{i=1}^n \frac{-y_i}{1+e^{- y_i (\beta_0+x_i^T\beta)}} $$
+
+$$ \frac{\partial L}{\partial \beta}  =  \sum_{i=1}^n \frac{y_i x_i}{1+e^{- y_i (\beta_0+x_i^T\beta)}} + 2 \lambda \beta $$
+
+  * [10 pts] Write a  penalized loss objective function `SVMfn(b, x, y, lambda)` and its gradient `SVMgn(b, x, y, lambda)`
+  Report the followings:
+  
+```{r}
+SVMfn = function(b, x, y, lambda){
+  b0 = b[1]
+  b1 = b[2:3]
+  sum(log(1 + exp(-y*(b0+x%*%b1))))+lambda*(norm(b1, type = c("2"))^2)
+} 
+```
+```{r}
+SVMgn = function(b, x, y, lambda){
+  # initial
+  gradients = rep(NA, 3)
+  b0 = b[1]
+  b1 = b[2:3]
+  
+  # calculate gradients beta0
+  gradients[1] = sum(-y/(1+exp(y*(b0+x%*%b1))))
+  
+  # calculate gradients beta1
+  gradients[2] = sum(-y*x[,1]/(1+exp(y*(b0+x%*%b1))))+2*lambda*b1[1]
+  
+  # calculate gradients beta3
+  gradients[3] = sum(-y*x[,2]/(1+exp(y*(b0+x%*%b1))))+2*lambda*b1[2]
+  
+  return(gradients)
+} 
+```
+
+  * Solve the coefficients using `optim()` and your objective and gradient functions with $\lambda = 1$ and `BFGS` method. Use 0 as the initialized value. 
+
+```{r}
+optim(par = c(0,0,0), fn = SVMfn, x = x, y = y, lambda = 1, method = "BFGS")
+```
+  
+```{r}
+optim(par = c(0,0,0), fn = SVMfn, x = x, y = y, lambda = 1, method = "BFGS", gr = SVMgn)
+```
+  
+* Your coefficients
+* Your loss and mis-classification rate on training data.
+* Plot all data and the decision line
+* Hint: If you want to check your gradient function, you can run `optim()` without a this gradient function and compare the parameters to your previous ones. Note this will be much slower. You are not required to report this result. 
+
+```{r}
+# Predict model
+pred.SVMgn = optim(par = c(0,0,0), fn = SVMfn, x = x, y = y, lambda = 1, method = "BFGS", gr = SVMgn)
+```
+```{r}
+# Report coefficients
+beta.4 = pred.SVMgn$par
+beta.4
+```
+
+*ANS: * My $\beta_0$ is -2.280224 and $\boldsymbol \beta$ is [1.575650, 1.509805]
+
+```{r}
+# prediction and misclassifiation rate
+pred = sign(cbind(1, x) %*% beta.4)
+mean(pred != y)
+```
+
+*ANS: * My mis-classification rate on training data is 0.1475
+
+```{r}
+pred.SVMgn$value
+```
+
+*ANS: * My loss is 129.86
+
+```{r}
+# Plot decision line on top of training data scatter plot
+plot(x, col=ifelse(y>0,"darkorange", "deepskyblue"), pch = 19, xlab = "x1", ylab = "x2")
+  legend("topleft", c("Positive","Negative"), col=c("darkorange", "deepskyblue"), 
+         pch=c(19, 19), text.col=c("darkorange", "deepskyblue"))
+
+  
+abline(-beta.4[1]/beta.4[3], -beta.4[2]/beta.4[3], col="black")
+
+
+abline(-(beta.4[1]-1)/beta.4[3], -beta.4[2]/beta.4[3], col="black", lty=3)
+abline(-(beta.4[1]+1)/beta.4[3], -beta.4[2]/beta.4[3], col="black", lty=3)
+```
+
+
+
+
+
+
