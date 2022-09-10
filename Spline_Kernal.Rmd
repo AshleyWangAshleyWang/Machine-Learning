@@ -1,0 +1,386 @@
+- Understand how the spline basis is constructed. We will use the `Ozone` data from the `mlbench` package.
+- Kernel regression involves two decisions: choosing the kernel and tuning the bandwidth. Usually, tuning the bandwidth is more influential than choosing the kernel function. Tuning the bandwidth is similar to tuning $k$ in a KNN model. However, this is more difficult in multi-dimensional models. We practice one and two-dimensional kernels that involves these elements.
+
+# Question 1 Write Your Own Spline Basis (Univariate Spline Fit)
+
+We will fit and compare different spline models to the `Ozone` dataset form the `mlbench` package. We have pre-processed this dataset. Please use our provided train/test csv files. This dataset has three variables: `time`, `ozone` and `wind`. For the spline question, we will only use `time` as the covariate and `ozone` as the outcome. 
+
+```{r fig.width = 12}
+  train = read.csv("ozoneTrain.csv")
+  test  = read.csv("ozoneTest.csv")
+  par(mfrow=c(1,2))
+
+  plot(train$time, train$ozone, pch = 19, cex = 0.5)
+  plot(train$wind + runif(nrow(train), -0.15, 0.15), 
+       train$ozone, pch = 19, cex = 0.5)
+```
+
+Let's consider several different spline constructions to model the `ozone` level using `time`. Please read the requirements carefully since some of them require you to write your own code.
+  - To test your model, use the train/test split provided above. 
+  - Use the mean squared error as the metric for evaluation and report the MSE for each method in a single summary table. 
+  - For the spline basis that you write with your own code, make sure to include the intercept term. 
+  - For question a) and b) and d), provide the following summary information at the end of your answer:
+    - A table of MSE on testing data. Please label each method clearly.
+    - Three figures (you could consider making them side-by-side for a better comparison) at the end. Each figure consists of scatter plots of both training and testing data points and the fitted curve on the range `x = seq(0, 1, by = 0.01)`.
+
+a) Write your own code (you cannot use `bs()` or similar functions) to implement a continuous piece-wise linear fitting. Pick 4 knots at $(0.2, 0.4, 0.6, 0.8)$. 
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+```
+```{r}
+# we need to sort train/ test data by x first
+train = train %>% arrange(time)
+test = test %>% arrange(time)
+```
+```{r}
+# initial
+myknots = c(0.2, 0.4, 0.6, 0.8)
+pos <- function(x) x*(x>0)
+```
+```{r}
+# create basis for continuous piece-wise
+mybasis.a = cbind("int" = 1, "x_1" = train$time, 
+                "x_2" = pos(train$time - myknots[1]),
+                "x_3" = pos(train$time - myknots[2]),
+                "x_4" = pos(train$time - myknots[3]),
+                "x_5" = pos(train$time - myknots[4]))
+
+# fit the model (-1 is because we don't want intercept, our basis already have)
+lmfit.a <- lm(train$ozone ~ .-1, data = data.frame(mybasis.a)) 
+```
+
+
+b) Write your own code to implement a quadratic spline fitting. Your spline should be continuous up to the first derivative. Pick 4 knots as $(0.2, 0.4, 0.6, 0.8)$.
+
+```{r}
+# create basis for quadratic spline
+mybasis.b = cbind("int" = 1, "x_1" = train$time, 
+                "x_2" = (train$time)^2,
+                "x_3" = pos((train$time - myknots[1]))^2,
+                "x_4" = pos((train$time - myknots[2]))^2,
+                "x_5" = pos((train$time - myknots[3]))^2,
+                "x_6" = pos((train$time - myknots[4]))^2)
+
+# fit the model
+lmfit.b <- lm(train$ozone ~ .-1, data = data.frame(mybasis.b)) 
+```
+
+
+c) Produce a set of B-spline basis with the same knots and degrees as (ii) using the `bs()` function. Note that they do not have to be exactly the same as yours. 
+
+```{r}
+# fit the model
+bs.basis = splines::bs(train$time, degree = 2, knots = myknots, intercept = TRUE) #df=7
+lmfit.c <- lm(ozone ~ bs.basis, data = train)
+```
+
+
+Compare the design matrix from b) and c) as follows:
+- Check the the difference between their projection matrices (the hat-matrices of the corresponding linear regression) on the training data to verify that the column spaces are the same. The difference is measured by $\text{max}_{i, j} |H_{i, j}^{(1)} - H_{i, j}^{(2)}|$, where $H^{(1)}$ and $H^{(2)}$ are corresponding to the two hat-matrices.
+    
+```{r}
+# hat-matrices of b (mybasis is built from training data)
+hat.b = (mybasis.b)%*%solve(t(mybasis.b)%*%(mybasis.b))%*%t(mybasis.b)
+# hat-matrices of c
+hat.c = (bs.basis)%*%solve(t(bs.basis)%*%(bs.basis))%*%t(bs.basis)
+# calculate difference
+diff = max(abs(hat.b-hat.c))
+diff
+```
+
+- The difference between the projection matrices of b) and c) is 3.455652e-12, which is almost 0, so we verified that the column spaces of them are the same.
+
+- Compare the conditional number $\frac{\sigma_\text{max}}{\sigma_\text{min}}$ of each deign matrix, where $\sigma_\text{max}$ and $\sigma_\text{min}$ denote the largest and smallest singular values, respectively.
+    
+```{r}
+# calculate d matrix
+d.design.b = svd(mybasis.b)$d
+d.design.c = svd(bs.basis)$d
+
+#calculate conditional matrix
+conditional.num.b = max(d.design.b)/min(d.design.b)
+conditional.num.c = max(d.design.c)/min(d.design.c)
+
+# print the result
+Spline = c("Quadratic Spline", "Smoothing Spline")
+conditional_number = c(conditional.num.b, conditional.num.c)
+tibble(Spline, conditional_number)
+```
+
+- The B-spline basis(3.714948) has smaller conditional number than that of quadratic spline fitting(920.7992).
+
+
+- Why B-spline has a smaller condition number even though two design matrices have the same column space. Some basic information of the conditional number (for linear regression) can be found [here](https://en.wikipedia.org/wiki/Condition_number).
+
+This is because our basis has collinearity problem and the B-spline basis generated by the bs() function has smaller collinearity problem, it's more stable, so has smaller condition number.
+
+
+d) Use existing functions to implement a smoothing spline. Use the built-in generalized cross-validation method to select the best tuning parameter.
+
+```{r, message=FALSE, warning=FALSE}
+library(splines)
+```
+```{r}
+lmfit.d = smooth.spline(x=train$time, y=train$ozone, w=NULL, cv= FALSE) 
+lmfit.d$lambda
+```
+
+- The best tuning parameter that I get from the smooth spline function is $lambda$ equals to 1.242997e-07.
+
+
+*Summary different Splines*
+
+```{r, message=FALSE, warning=FALSE}
+library(MLmetrics)
+```
+```{r}
+# write the design matrix function
+
+predict.design = function(xColumn, method){
+  if(method == "Continuous Piece-Wise"){
+    x.matrix = data.frame(cbind(1, xColumn,
+                                pos(xColumn - myknots[1]),
+                                pos(xColumn - myknots[2]), 
+                                pos(xColumn - myknots[3]),
+                                pos(xColumn - myknots[4])))
+  } else if(method == "Quadratic Spline"){
+    x.matrix = data.frame(cbind(1, xColumn,
+                                pos((xColumn))^2,
+                                pos((xColumn - myknots[1]))^2,
+                                pos((xColumn - myknots[2]))^2,
+                                pos((xColumn - myknots[3]))^2,
+                                pos((xColumn - myknots[4]))^2))
+  }
+  return(x.matrix)
+}
+```
+```{r}
+# predict
+# predict for test data
+pred.a = as.matrix(predict.design(test$time, "Continuous Piece-Wise"))%*%
+  as.matrix(lmfit.a$coefficients)
+pred.b = as.matrix(predict.design(test$time, "Quadratic Spline"))%*%
+  as.matrix(lmfit.b$coefficients)
+pred.d = predict(lmfit.d, test$time)
+
+# predict for grid for the curve
+x = seq(0, 1, by = 0.01)
+pred.curv.a = as.matrix(predict.design(x, "Continuous Piece-Wise"))%*%
+  as.matrix(lmfit.a$coefficients)
+pred.curv.b = as.matrix(predict.design(x, "Quadratic Spline"))%*%
+  as.matrix(lmfit.b$coefficients)
+pred.curv.d = predict(lmfit.d, x)
+```
+```{r}
+# calculate MSE for test data
+MSE.a = MSE(y_pred = pred.a, y_true = test$ozone)
+MSE.b = MSE(y_pred = pred.b, y_true = test$ozone)
+MSE.d = MSE(y_pred = pred.d$y, y_true = test$ozone)
+```
+```{r}
+# plot
+par(mfrow=c(1,3))  
+
+fitting.plot = function(model, predicted.value, title, train.d, test.d){
+  sub.train = train.d %>% dplyr::select(c("time", "ozone"))
+  sub.test = test.d %>% dplyr::select(c("time", "ozone"))
+  plot(sub.train, pch = 19, col = "darkorange")
+  points(sub.test, pch = 19, col = "darkgreen")
+  x = seq(0, 1, by = 0.01)
+  lines(x, predicted.value, lty = 1, col = "deepskyblue", lwd = 2)
+  title(title)
+}
+
+fitting.plot(lmfit.a, pred.curv.a, "Continuous Piece-Wise", train, test)
+fitting.plot(lmfit.b, pred.curv.b, "Quadratic Spline", train, test)
+fitting.plot(lmfit.d, pred.curv.d$y, "Smoothing Spline", train, test)
+```
+
+MSE Summary Table
+
+```{r}
+Spline = c("Continuous Piece-Wise", "Quadratic Spline", "Smoothing Spline")
+MSE = c(MSE.a,MSE.b,MSE.d)
+tibble(Spline, MSE)
+```
+
+
+
+
+# Question 2 Kernel Regression 
+
+We will use the same ozone data. For Question a), we only use `time` as the covariate, while in Question b, we use both `time` and `wind`. 
+
+## a) One-dimensional kernel regression.
+
+You are required to implement (write your own code) two kernel regression models, using the following two kernels function, respectively: 
+
+  * Gaussian kernel, defined as $K(u) = \frac{1}{\sqrt{2 \pi}} e^{- \frac{u^2}{2}}$
+  * Epanechnikov kernel, defined as $K(u) = \frac{3}{4}(1-u^2)$ for $|u| \leq 1$. 
+
+For both kernel functions, incorporate a bandwidth $\lambda$. You should start with the Silverman's rule-of-thumb for the choice of $\lambda$, and then tune $\lambda$ (for example, increase or decrease by 10%, 20%, 30% etc.). Then, perform the following:
+
+  * (I) Using just the Silverman's rule-of-thumb, fit and plot the regression line with both kernel functions, in a single figure. Add the training/testing points, just like Question 1. Report the testing MSE of both methods in a table.
+
+```{r}
+# calculate Silverman's rule-of-thumb lambda
+lambda.gau = 1.06*sd(train$time)*nrow(train)^(-1/5)
+```
+```{r}
+# Gaussian kernel
+Gaussian.kernel = function(x, x_i, lambda){
+  u = (x-x_i)/lambda
+  return(exp((-(u)^2)/2)/sqrt(2*pi))
+}
+```
+```{r}
+# Gaussian kernel
+Epanechnikov.kernel = function(x, x_i, lambda){
+  u = 1 - ((x - x_i)/lambda)^2
+  return((3/4) * u * (u > 0))
+}
+```
+```{r}
+kernel.pred = function(x, y, xTest, lambda, kernel){
+  pred = rep(NA, length(xTest))
+  for(i in 1:length(xTest)){
+    if(kernel == "Gaussian"){
+      weight = Gaussian.kernel(xTest[i], x, lambda)
+    } else if(kernel == "Epanechnikov"){
+      weight = Epanechnikov.kernel(xTest[i], x, lambda)
+    }
+    pred[i] = sum(weight*y) / sum(weight)
+  }
+  return(pred)
+}
+```
+```{r}
+# fit with test data
+Gaussian.pred = kernel.pred(train$time, train$ozone, 
+                       xTest = test$time, lambda = lambda.gau, kernel = "Gaussian")
+Epanechnikov.pred = kernel.pred(train$time, train$ozone, 
+                       xTest = test$time, lambda = lambda.gau, kernel = "Epanechnikov")
+```
+```{r}
+# plot
+plot(cbind(train$time, train$ozone), pch = 19, col = "darkorange")
+points(cbind(test$time, test$ozone), pch = 19, col = "darkgreen")
+lines(test$time, Gaussian.pred, lty = 1, col = "deepskyblue", lwd = 1)
+lines(test$time, Epanechnikov.pred, lty = 1, col = "red", lwd = 1)
+legend(x = "topright", legend = c("Gaussian", "Epanechnikov"), 
+       col = c("deepskyblue", "red"), lwd = 1)
+```
+```{r}
+# testing MSE
+Gaussian.error = mean((Gaussian.pred - test$ozone)^2)
+Epanechnikov.error = mean((Epanechnikov.pred - test$ozone)^2)
+```
+```{r}
+# present as a table
+kernel = c("Gaussian kernel", "Epanechnikov kernel")
+MSE = c(Gaussian.error,Epanechnikov.error)
+tibble(kernel, MSE)
+```
+
+  
+* (II) For the Epanechnikov kernel, tune the $\lambda$ value by minimizing the testing error. Use a grid of 10 different $\lambda$ values at your choice. What is the best $\lambda$ value that minimizes the testing error? Plot your optimal regression line and report the best $\lambda$ and the testing error.
+
+```{r}
+grid = seq(0.1, 1, by = 0.1)
+grid.err = rep(NA, length(grid))
+
+for(i in 1:length(grid)){
+  Epanechnikov.pred = kernel.pred(train$time, train$ozone, 
+                       xTest = test$time, lambda = grid[i], kernel = "Epanechnikov")
+  grid.err[i] = mean((Epanechnikov.pred - test$ozone)^2)
+}
+```
+```{r}
+# get the lambda with minimum testing error
+tibble(grid, grid.err) %>% arrange(grid.err) %>% slice(1)
+```
+
+**ANS: **0.2 is my best lambda. When my lambda equals to 0.2, my Epanechnikov kernel will get the minimum testing error, which equals to 29.77195.
+
+
+```{r}
+# fit model with my best lambda 
+grid.best.pred = kernel.pred(train$time, train$ozone, 
+                       xTest = test$time, lambda = 0.2, kernel = "Epanechnikov")
+```
+```{r}
+# plot optimal regression line
+plot(cbind(train$time, train$ozone), pch = 19, col = "darkorange")
+points(cbind(test$time, test$ozone), pch = 19, col = "darkgreen")
+lines(test$time, grid.best.pred, lty = 1, col = "deepskyblue", lwd = 2)
+title("lambda = 0.2")
+```
+
+## b) Two-dimensional Kernel
+
+We consider using both `time` and `wind` in the regression. We use the following multivariate kernel function, which is essentially a Gaussian kernel with diagonal covariance matrix. You can also view this as the product of two kernel functions, corresponding to the two variables:
+
+$$ K_{\boldsymbol \lambda}(x, z) \propto \exp\Big\{ -\frac{1}{2} \sum_{j=1}^p \big( (x_j - z_j)/\lambda_j \big)^2 \Big\}$$
+Based on the Silverman's formula, the bandwidth for the $j$th variable is given by
+$$\lambda_k = \left(\frac{4}{p+2}\right)^{\frac{1}{p+4}} n^{-\frac{1}{p+4}} \, \, \widehat \sigma_j,$$
+where $\widehat\sigma_j$ is the estimated standard deviation for variable $j$. Use the Nadaraya-Watson kernel estimator to fit and predict the `ozone` level using `time` and `wind`. At the end, report the testing error.
+  
+```{r}
+# calculate lambda
+lambda.multivar = function(p, n, variable){
+  return((4 / (p+2))^(1/(p+4))*n^(-1/(p+4))* sd(variable))
+}
+lambda.time = lambda.multivar(2,nrow(train),train$time)
+lambda.wind = lambda.multivar(2,nrow(train),train$wind)
+```
+```{r}
+# define kernel
+multivariate.kernel = function(x, x_i, lambda){
+  u = (x-x_i)/lambda
+  return(exp(-(u)^2/2))
+}
+```
+```{r}
+two.dimension.kernel.pred <- function(x, y, xTest, lambda){
+  
+  #initial
+  pred.out = rep(NA, nrow(xTest))
+  
+  for (i in 1:nrow(xTest)){
+    weight.matrix <- matrix(0, nrow = nrow(x), ncol= length(lambda))
+    
+    # we calculate separate kernel first
+    for(j in 1:length(lambda)){
+      # two kernals for each var
+      weight.matrix[,j] = multivariate.kernel(xTest[i, j], x[, j], lambda[j]) 
+    }
+    
+    # then multiply them to get the wholel weight
+    w.whole <- apply(weight.matrix, 1, prod)
+    pred.out[i] = sum(y * w.whole) / sum(w.whole)
+  }
+  return(x)
+}
+```
+```{r}
+# predict with test data
+multi.pred = two.dimension.kernel.pred(cbind(train$time, train$wind), train$ozone,
+                                       xTest = cbind(test$time, test$wind), 
+                                       lambda = c(lambda.time, lambda.wind))
+```
+```{r}
+# calculate test error (MSE)
+MSE(y_pred = multi.pred, y_true = test$ozone)
+```
+
+  
+## c) Variance of Multi-dimensional Kernel
+
+In our lecture, we only introduced the one-dimensional case for density estimations. For a regression problem, the rate is essentially the same. However, when we have multivariate kernels, the rate of bias and variance will change. If we use the same $\lambda$ from the one-dimensional case in a two-dimensional problem, would you expect the bias to increase/decrease/unchanged? Would you expect the variance to increase/decrease/unchanged? And why? Hint: for the same $\lambda$, bias is quantified by how far your neighboring points are, and variance is quantified by how many points you are capturing within that neighborhood. 
+
+**ANS: ** When becoming two-dimension from one-dimension, less points can be captured in our specific neighborhood(we can consider it as a cube), so I think the variance will reduce. As the variance reduce, the bias will increase because of the variance-bias trade off. We can also understand the variance part as since we become higher dimension(from one to two), we will be farther from neighbor points, so the bias will increase.  
+
+
+
