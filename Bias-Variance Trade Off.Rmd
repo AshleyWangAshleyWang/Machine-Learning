@@ -1,0 +1,329 @@
+In the first question, we will use a simulation study to confirm the theoretical analysis we developed during the lecture. In the second question, we will practice several linear model selection techniques such as AIC, BIC, and best subset selection. However, some difficulties are at the data processing part, in which we use the Bitcoin data from Kaggle. This is essentially a time-series dataset, and we use the information in previous days to predict the price in a future day. Make sure that you process the data correctly to fit this task. 
+
+## Question 1 Simulation Study
+
+Let's use a simulation study to confirm the bias-variance trade-off of linear regressions. Consider the following model. 
+
+$$Y = \sum_j^p 0.8^j \times X_j + \epsilon$$
+All the covariates and the error term follow i.i.d. standard Gaussian distribution. The true model involves all the variables; however, larger indexes do not significantly contribute to the variation. Hence, there could be a benefit in using a smaller subset for prediction purposes. Let's confirm that with a simulation study. 
+
+  - Generate 100 samples of covariates $X$ with $p=30$ by the following code.
+```{r}
+set.seed(542)
+n = 100
+p = 30
+b = 0.8^(1:p)
+X = matrix(rnorm(n*p), n, p)
+Ytrue = X %*% b
+```
+
+  - Then the study essentially **repeats** the following steps 100 times. Begin with another fixed random seed before your loop.
+    - Using the fixed covariates $X$, generate 100 training outcomes $Y_{train}$ and 100 testing outcomes $Y_test$ independently.
+    - Consider using only the first $j$ variables to fit the linear regression (**NO intercept term**). Let $j$ ranges from 1 to 30. Calculate and record the corresponding prediction error by comparing your prediction with the outcomes for testing data. 
+
+**Without running the simulation**, for each $j$ value, we also have the theoretical decomposition of the testing error based on the lecture. Suppose you know the true model, covariates $X$ and the distribution of random noise.
+
+  a) Please calculate the bias^2 , variance (of the prediction) and testing error for each $j$ based on the theoretical formulas. Plot the 3 lines on the same figure,  using the `number of variables` as the x-axis and `bias^2`, `variance`, `theoretical testing error`  as the y-axis. Label each line.
+   - $Bias^2 =  \frac{1}{n} \| E(Y_{pred} - Y_{true}) \|^2$, where $Y$ is a $n \times 1$ vector.
+   - $Var =  \frac{1}{n} E \|(Y_{pred} - E(Y_{pred}) \|^2$.
+
+```{r, message=FALSE, warning=FALSE}
+library(pracma)
+library(tidyverse)
+```
+```{r}
+set.seed(1)
+n = 100
+p = 30
+b = 0.8^(1:p)
+X = matrix(rnorm(n*p), n, p) # Use the fixed covariates X
+Y.true = X %*% b
+
+# generate training/ testing data
+ytrain = X %*% b + rnorm(n)
+ytest = X %*% b + rnorm(n)
+```
+```{r}
+k = seq(1, 30, by=1)
+
+bias.square.list = rep(NA, 30)
+variance.list = rep(NA, 30)
+theo.test.err.list = rep(NA, 30)
+
+for (j in 1:30){
+  # mu & H matrix & theta 
+  mu = X[,1:j] %*% as.matrix(b[1:j])
+  h = X[,1:j] %*% solve(t(X[,1:j])%*%X[,1:j])%*%t(X[,1:j])
+  y.hat = h %*% ytrain
+  e.y.pred = h %*% Y.true
+  theta = 1
+  
+  # calculate bias square, variance, test err
+  bias.square.list[j] = (t(e.y.pred-Y.true)%*%(e.y.pred-Y.true))/100
+  variance.list[j] = (j*theta^2)/n
+}
+theo.test.err.list = bias.square.list + variance.list + 1
+
+```
+```{r}
+out.table = tibble(k, bias.square.list, variance.list, theo.test.err.list)
+require(ggplot2)
+ggplot(out.table, aes(k)) + 
+  geom_line(aes(y = bias.square.list, colour = "Bias^2")) + 
+  geom_line(aes(y = variance.list, colour = "Variance")) +
+  geom_line(aes(y = theo.test.err.list, colour = "Test err"))+
+  scale_y_continuous(name=" ") + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+    
+  b) [5 pts] Report the theoretical testing error with $p = 30$, $\frac{1}{n}E \|Y_{test} - Y_{pred} \|^2$.
+  
+```{r}
+out.table %>% filter(k==30) %>% dplyr::select(c(k, theo.test.err.list))
+```
+
+- The theoretical testing error with $p = 30$ is 1.3
+
+
+**After finishing the simulation**:
+
+  c) Perform the simulation. Report the averaged (empirical) prediction error with $p = 30$. Note that 100 times simulation approximates the $E$ operation. Plot `pred err` in the **same figure** of question a. Label your line. Does your empirical testing error match our theoretical analysis? Comment on your findings.
+
+```{r}
+nsim = 100
+k = seq(1, 30, by=1)
+allerrors = matrix(NA, nsim, 30)
+allbias = matrix(NA, nsim, 30)
+
+set.seed(542)
+for (i in 1:nsim){
+  ytrain = X %*% b + rnorm(n)
+  ytest = X %*% b + rnorm(n)
+  
+  for (j in 1:30)
+      {
+          # construct the data
+          traindata = data.frame("X" = X[, 1:j, drop = FALSE], "Y" = ytrain)
+          testdata = data.frame("X" = X[, 1:j, drop = FALSE], "Y" = ytest)
+          
+          # fit model and predict
+          onefit = lm(Y ~.-1, data = traindata)
+          ypred = predict(onefit, testdata[1:j])
+          
+          error = mean((testdata$Y-ypred)^2)
+          bias = mean((ypred - Y.true)^2)
+          # calculate empirical testing error
+          allerrors[i, j] = error
+          allbias[i,j] = bias
+  }
+}
+```
+```{r}
+out.table1 = cbind(out.table, 'empirical.prediction.error' = colMeans(allerrors))
+```
+```{r}
+ggplot(out.table1, aes(k)) + 
+  geom_line(aes(y = bias.square.list, colour = "Bias^2")) + 
+  geom_line(aes(y = variance.list, colour = "Variance")) +
+  geom_line(aes(y = theo.test.err.list, colour = "Theoretical Error"))+
+  geom_line(aes(y = empirical.prediction.error, colour = "Empirical Error"))+
+  scale_y_continuous(name=" ")
+```
+
+- From the above graph we can see the empirical testing error matches the theoretical testing error.
+
+
+  d) Evaluate the bias^2 for model $p=5$ without theoretical formulas. You can still assume you know the true outcomes while using the average results to approximate the $E$ operation. Compare the empirical value with the theoretical one.
+```{r}
+out.table2 = cbind(out.table1, 'empirical.prediction.bias.sq' = colMeans(allbias))
+out.table2 %>% filter(k==5) %>% 
+  dplyr::select(c(k,empirical.prediction.bias.sq, bias.square.list))
+```
+
+- The empirical bias^2 for model $p=5$ is 0.26 and the theoretical one is 0.21
+
+
+## Question 2 Bitcoin price prediction
+
+For this question, we will use the [Bitcoin data]() provided on the course website. The data were posted originally on Kaggle ([link](https://www.kaggle.com/sudalairajkumar/cryptocurrencypricehistory?select=bitcoin_cash_price.csv)). Make sure that you read relevant information from the Kaggle website. Our data is the `bitcoin_dataset.csv` file. You should use a training/testing split such that your training data is constructed using only information up to 12/31/2016, and your testing data is constructed using only information starting from 01/01/2017. The goal of our analysis is to predict the `btc_market_price`. Since this is longitudinal data, we will use the information from previous days to predict the market price at a future day. In particular, on each calendar day (say, day 1), we use the information from three days onward (days 1, 2, and 3) to predict the market price on the 7th day. 
+
+Hence you need to first reconstruct the data properly to fit this purpose. This is mainly to put the outcome (of day 7) and the covariates (of the previous days) into the same row. Note that you may face missing data, categorical predictors, outliers, scaling issues, computational issues, and maybe others for this question. Use your best judgment to deal with them. There is no general ``best answer''. Hence the grading will be based on whether you provided reasoning for your decision and whether you carried out the analysis correctly.
+
+a.  [25 Points] Data Construction. Data pre-processing is usually the most time-consuming and difficult part of an analysis. We will use this example as a practice. Construct your data appropriately such that further analysis can be performed. Make sure that you consider the following:
+
+    * The data is appropriate for our analysis goal: each row contains the outcome on the seventh day and the covariates based on the first three days. The covariates are not limited to the price.
+    * Missing data is addressed (you can remove variables, remove observations, impute values or propose your own method)
+    * You may process the covariates and/or outcome by considering centering, scaling, transformation, removing outliers, etc. However, these are your choice. 
+  
+For each of the above tasks, make sure that you **clearly document your choice**. In the end, provide a summary table/figure of your data. You can consider using boxplots, quantiles, histograms, or any method that is easy for readers to understand. You are required to pick at least one method to present. 
+
+```{r, message=FALSE, warning=FALSE}
+library(lubridate)
+library(VIM)
+library(lars)
+```
+```{r}
+# read data
+bitcoin = read.csv(file = "bitcoin.csv")
+# missing value imputation
+bitcoin.impu = kNN(bitcoin, variable = c('btc_trade_volume'), k=5)[,1:24]
+
+# data processing
+# delete price 0 
+bitcoin.impu = bitcoin.impu  %>% filter(btc_market_price != 0)
+```
+```{r}
+# data reconstruction
+bitcoin.recons = data.frame(matrix(ncol = 71, nrow = 0))
+for(i in 1:(nrow(bitcoin.impu)-7)){
+  bitcoin.recons = rbind(bitcoin.recons, 
+                         cbind(bitcoin.impu[i,1], bitcoin.impu[i+6,2],
+                               bitcoin.impu[i,2:24], bitcoin.impu[i+1,2:24],
+                               bitcoin.impu[i+2,2:24]))
+}
+```
+```{r}
+# create new column name
+colname.new =  unlist(list("Date","btc_market_price"))
+for(j in 1:3){
+  for(i in colnames(bitcoin.impu[2:24])){
+    colname.new = append(colname.new,paste0('X',as.character(j),'.',i))
+  }
+}
+# rename columns
+for(i in 1:length(bitcoin.recons)){
+  names(bitcoin.recons)[i] <- colname.new[i]
+}
+```
+```{r}
+# split testing/ training
+testing = bitcoin.recons %>% filter(Date >= as.Date("2017-01-01")) %>% 
+  dplyr::select (-c(Date))
+training = bitcoin.recons %>% filter(Date <= as.Date("2016-12-31")) %>% 
+  dplyr::select (-c(Date))
+```
+
+Transform y
+```{r, message=FALSE, warning=FALSE}
+library(MASS)
+library(olsrr)
+```
+```{r}
+# Do Box Cox transformation 
+bc <- boxcox(btc_market_price~., data = training)
+lambda <- bc$x[which.max(bc$y)]
+```
+
+Summary table of the data
+```{r}
+summary(bitcoin.impu)
+```
+
+
+b.  [20 Points] Model Selection Criterion. Use AIC and BIC criteria to select the best model and report the result from each of them. Use the forward selection for AIC and backward selection for BIC. Report the following mean squared error from **both training and testing data**. 
+
+    * The mean squared error: $n^{-1} \sum_{i}(Y_i - \widehat{Y}_i)^2$
+    * Since these quantities can be affected by scaling and transformation, make sure that you **state any modifications applied to the outcome variable**. Compare the training data errors and testing data errors. Which model works better? Provide a summary of your results. 
+
+```{r}
+# fit model
+lmfit = lm(((btc_market_price^lambda-1)/lambda) ~., data = training)
+
+# forward selection for AIC
+AIC = step(lmfit, direction="forward", trace=0)
+# backward selection for bIC
+BIC = step(lmfit, direction="backward", k=log(nrow(training)), trace=0)
+```
+```{r, warning=FALSE}
+# predict in training
+train.pred.AIC = predict(AIC, training)
+train.pred.BIC = predict(BIC, training)
+train.mse.AIC = round(mean((training$btc_market_price-train.pred.AIC)^2),2)
+train.mse.BIC = round(mean((training$btc_market_price-train.pred.BIC)^2),2)
+paste0('MSE of training data from foward AIC: ', train.mse.AIC)
+paste0('MSE of training data from foward BIC: ', train.mse.BIC)
+```
+```{r, warning=FALSE}
+# predict in testing
+test.pred.AIC = predict(AIC, testing)
+test.pred.BIC = predict(BIC, testing)
+test.mse.AIC = round(mean((testing$btc_market_price-test.pred.AIC)^2),2)
+test.mse.BIC = round(mean((testing$btc_market_price-test.pred.BIC)^2),2)
+paste0('MSE of testing data from foward AIC: ', test.mse.AIC)
+paste0('MSE of testing data from foward BIC: ', test.mse.BIC)
+```
+
+- From the above result we can see model built from forward selection for AIC has smaller mean squared error, hence we say it works better.
+
+
+c. Best Subset Selection. Fit the best subset selection to the dataset and report the best model of each model size (up to 7 variables, excluding the intercept) and their prediction errors. Make sure that you simplify your output to only present the essential information. If the algorithm cannot handle this many variables, then consider using just day 1 and 2 information. You can use `leaps` package for subset selection.
+
+```{r, message=FALSE, warning=FALSE}
+library(leaps)
+```
+```{r}
+RSSleaps = regsubsets(x = as.matrix(training[, -1]), y = training[, 1], 
+                      nvmax = 7, really.big=T)
+```
+```{r}
+RMSE = function(m, o){
+  sqrt(mean((m - o)^2))
+}
+```
+```{r}
+model.size = seq(1, 7, by=1)
+rmse = rep(NA,7)
+
+# Best Model with size 1
+sub1 = lm(btc_market_price~X3.btc_market_price, data=training)
+predictions <- sub1 %>% predict(training)
+rmse[1] = RMSE(predictions, training$btc_market_price)
+
+# Best Model with size 2
+sub2 = lm(btc_market_price~X2.btc_estimated_transaction_volume_usd+
+            X3.btc_trade_volume, data=training)
+predictions <- sub2 %>% predict(training)
+rmse[2] = RMSE(predictions, training$btc_market_price)
+
+# Best Model with size 3
+sub3 = lm(btc_market_price~X2.btc_estimated_transaction_volume_usd+
+            X3.btc_trade_volume+
+            X3.btc_estimated_transaction_volume_usd, data=training)
+predictions <- sub3 %>% predict(training)
+rmse[3] = RMSE(predictions, training$btc_market_price)
+
+# Best Model with size 4
+sub4 = lm(btc_market_price~X3.btc_blocks_size+
+            X3.btc_trade_volume+X3.btc_estimated_transaction_volume_usd+
+            X1.btc_n_transactions_total, data=training)
+predictions <- sub4 %>% predict(training)
+rmse[4] = RMSE(predictions, training$btc_market_price)
+
+# Best Model with size 5
+sub5 = lm(btc_market_price~X1.btc_market_price+X1.btc_n_transactions_total+
+            X2.btc_estimated_transaction_volume_usd+X3.btc_trade_volume+
+            X3.btc_blocks_size, data=training)
+predictions <- sub5 %>% predict(training)
+rmse[5] = RMSE(predictions, training$btc_market_price)
+
+# Best Model with size 6
+sub6 = lm(btc_market_price~X1.btc_market_price+X1.btc_n_transactions_total+
+            X2.btc_market_price+X2.btc_cost_per_transaction+
+            X2.btc_estimated_transaction_volume_usd+
+            X3.btc_trade_volume, data=training)
+predictions <- sub6 %>% predict(training)
+rmse[6] = RMSE(predictions, training$btc_market_price)
+
+# Best Model with size 7
+sub7 = lm(btc_market_price~X3.btc_estimated_transaction_volume_usd+
+            X3.btc_cost_per_transaction+X3.btc_blocks_size+
+            X3.btc_market_price+X3.btc_trade_volume+
+            X2.btc_estimated_transaction_volume_usd+
+            X1.btc_n_transactions_total, data=training)
+predictions <- sub7 %>% predict(training)
+rmse[7] = RMSE(predictions, training$btc_market_price)
+```
+```{r}
+tibble(model.size, rmse)
+```
+- The above table shows RMSE with different best model with different size. We can see when model size is 7, we have the smallest RMSE.  
