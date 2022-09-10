@@ -1,0 +1,302 @@
+
+## Question 1 KNN Classification (Diabetes)
+
+Load the Pima Indians Diabetes Database (`PimaIndiansDiabetes`) from the `mlbench` package. If you don't already have this package installed, use the following code. It also randomly splits the data into training and testing. You should preserve this split in the analysis. 
+```{r, results='hide', message=FALSE, warning=FALSE}
+# install.packages("mlbench") # run this line if you don't have the package
+library(mlbench)
+```
+```{r}
+data(PimaIndiansDiabetes)
+    
+set.seed(2)
+trainid = sample(1:nrow(PimaIndiansDiabetes), 
+                 nrow(PimaIndiansDiabetes)/2)
+Diab.train = PimaIndiansDiabetes[trainid, ]
+Diab.test = PimaIndiansDiabetes[-trainid, ]
+```
+
+Read the documentation of this dataset [here](https://cran.r-project.org/web/packages/mlbench/mlbench.pdf) and make sure that you understand the goal of this classification problem. 
+
+Use a grid of $k$ values (every integer) from 1 to 20. 
+
+```{r}
+# data preparation, change y to num
+Diab.test[,9]=ifelse(Diab.test[,9] == "neg",0,1)
+Diab.train[,9]=ifelse(Diab.train[,9] == "neg",0,1)
+```
+```{r}
+# separate training/ testing data to x and y
+x <- Diab.train[,-9]
+y <- as.integer(Diab.train[,9])
+xt <- Diab.test[,-9]
+yt <- as.integer(Diab.test[,9])
+```
+
+a) Fit a KNN model using `Diab.train` and calculate both training and testing errors. For the testing error, use `Diab.test`. Plot the two errors against the corresponding $k$ values. Make sure that you differentiate them using different colors/shapes and add proper legends. 
+
+```{r, message=FALSE, warning=FALSE}
+library(class)
+library(tidyverse)
+```
+```{r}
+k = seq(1, 20, by=1) #Use grid from 1:20 to train
+tr.errors = rep(NA, length(k))
+te.errors = rep(NA, length(k))
+
+# set seed
+set.seed(670144148)
+for(i in 1:length(k)){
+  # predict training
+  tr.fit <- knn(train = x, test = x, cl = y, k = i)
+  tr.errors[i]=sum(tr.fit != y)/nrow(x)
+  
+  # predict testing
+  te.fit <- knn(train = x, test = xt, cl = y, k = i)
+  te.errors[i]=sum(te.fit != y)/nrow(xt)
+}
+```
+```{r}
+# prepare data to draw the pic 
+tb = tibble(k, tr.errors, te.errors)
+require(ggplot2)
+ggplot(tb, aes(k)) + 
+  geom_line(aes(y = tr.errors, colour = "Training")) + 
+  geom_line(aes(y = te.errors, colour = "Testing")) +
+  scale_y_continuous(name="Error") + 
+  ggtitle("Testing/ Training Error v.s K")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+b) Does the plot match (approximately) our intuition of the bias-variance trade-off in terms of having a U-shaped error? What is the optimal $k$ value based on this result? For the optimal `k`, what is the corresponding degrees-of-freedom and its error?
+
+```{r}
+# calculate the k with minimum error
+tb %>%
+  select(k,te.errors) %>% arrange(te.errors) %>% slice(1)
+```
+```{r}
+# calculate degree of freedom
+nrow(xt)/20
+```
+
+- The U-shaped of the testing error is not such obviously, the minimum error is 0.385 which appears when k equals to 20. However, if we change our max k into 40, the curve will be a U-shaped.  As for the degrees-of-freedom, our df here is nearly 19.2 since we know the calculation method is $n/k$ from the note we know the, so we can calculate it directly. 
+
+
+
+c) Suppose we do not have access to `Diab.test` data. Thus, we need to further split the training data into train and validation data to tune `k`. For this question, use the `caret` package to complete the tuning. You are required to 
+    * Train the model with cross-validation using the `train()` function.
+      * Specify the type of cross-validation using the `trainControl()` function. We need to use three-fold cross-validation.
+      * Specify a grid of tuning parameters. This can be done using `expand.grid(k = c(1:20))`.
+    * Report the best parameter with its error. Compare it with your `k` in b).
+    
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+```    
+```{r}
+# build the control function
+control <- trainControl(method = "repeatedcv", number = 3,repeats=3) # 3 fold
+
+# set seed
+set.seed(670144148)
+# fit knn
+knn.cvfit <- train(y ~ ., method = "knn",
+  data = data.frame("x" = x, "y" = as.factor(y)),
+  tuneGrid = expand.grid(k = c(1:20)), # set grid
+  trControl = control)
+```
+```{r}
+# plot to find the best tuning
+plot(knn.cvfit$results$k, 1-knn.cvfit$results$Accuracy,
+xlab = "K", ylab = "Classification Error", type = "b",
+pch = 19, col = "darkorange")
+```
+```{r}
+# calculate the k with minimum error
+tibble(k, 1-knn.cvfit$result$Accuracy) %>% 
+  rename(Error = '1 - knn.cvfit$result$Accuracy') %>%
+  arrange(Error) %>% slice(1)
+```
+
+For details, read either the example from SMLR or the documentation at [here](https://topepo.github.io/caret/model-training-and-tuning.html){target='_blank'} to learn how to use the `trainControl()` and `train()` functions. Some examples can also be found at [here](https://cran.r-project.org/web/packages/caret/caret.pdf){target='_blank'}. Apply the function to the `zip.train` data with our choice of $k$ grid. 
+
+ - The best parameter here is when k equals to 20, which gives us the minimum error 0.276. This result is the same with the one we get from part b. 
+
+
+## Write your own KNN for regression
+
+a. Generate $p=5$ independent standard Normal covariates $X_1, X_2, X_3, X_4, X_5$ of $n = 1000$ independent observations. Then, generate $Y$ from the regression model
+  $$ Y = X_1 + 0.5 \times X_2 - X_3 + \epsilon,$$
+with i.i.d. standard normal error $\epsilon$. Make sure to set a random seed 1 for reproducibility. 
+
+```{r}
+# data generator
+dt.ger = function(seed, number){
+  set.seed(1)
+  dataF <- data.frame(matrix(ncol = 0, nrow = 1000))
+  for(i in 1:number){
+    nam <- paste("X", i, sep = "")
+    dataF = cbind(dataF, rnorm(1000, mean = 0, sd = 1))
+    names(dataF)[i] = nam
+  }
+  return(dataF)
+}
+```
+```{r}
+# generate x (5 independent standard Normal covariates)
+q2.d = dt.ger(1,5)
+
+# generate y
+y = q2.d$X1 + 0.5*q2.d$X2 - q2.d$X3 + rnorm(1000, mean=0, sd=1)
+q2.d = cbind(q2.d,y)
+```
+
+- Use a KNN implementation from an existing package. Report the mean squared error (MSE) for your prediction with `k = 5`. Use the first 500 observations as the training data and the rest as testing data. Predict the $Y$ values using your KNN function with `k = 5`. Mean squared error is 
+$$\frac{1}{N}\sum_i (y_i - \widehat y_i)^2$$. This question also helps you validate your own function in b).
+
+```{r}
+# split data
+training.d = q2.d[1:500,]
+testing.d = q2.d[-(1:500),]
+```
+```{r, message=FALSE, warning=FALSE}
+library(kknn)
+```
+```{r}
+ctrl <- trainControl(method="repeatedcv",number = 3) # set seed
+
+# set seed
+set.seed(670144148)
+knnFit <- train(y ~ ., data = testing.d, method = "knn", 
+                trControl = ctrl, tuneLength = 5)
+
+# get the mse of our best k value
+knnFit$results %>% slice(1) %>% 
+  select(k, RMSE) %>% mutate(MSE = RMSE^2)
+```
+
+
+b. For this question, you __cannot__ use (load) any additional `R` package. Write your own function `myknn(xtrain, ytrain, xtest, k)` that fits a KNN model and predict multiple target points `xtest`. The function should return a variable `ytest`.
+    - Here, `xtrain` is the training dataset covariate value, `ytrain` is the training data outcome, and `k` is the number of nearest neighbors. `ytest` is the prediction on `xtest`. 
+    - Use Euclidean distance to calculate the closeness between two points.
+    - Test your code by reporting the mean square error on the testing data. 
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+```
+```{r}
+x_train.m = training.d[,1:5]
+y_train.m = training.d$y
+x_test.m = testing.d[,1:5]
+y_test.m = testing.d$y
+
+y.output = rep(NA, 500)
+
+myknn <- function(x_train, y_train, x_test, k){
+  euclidean <- function(a, b) sqrt(sum((a - b)^2))
+  # loop through each row
+  for(i in 1:nrow(x_test)){
+    # calculate Euclidean distance
+    eu.distant.list = rep(NA, 500)
+    train.y = rep(NA, 500)
+    for(j in 1:nrow(x_train)){
+      eu.distant.list[j] = euclidean(x_test[i,], x_train[j,])
+      train.y[j] = y_train[j]
+    }
+    whole.x = cbind(x_test, train.y, eu.distant.list)
+    
+    # sort by distance
+    knn_sliced = whole.x %>% arrange(eu.distant.list) %>% slice(2:(k+1)) 
+    
+    # calculate y value
+    y_value = knn_sliced %>% dplyr::select(train.y) %>% colMeans(.,na.rm = TRUE)
+
+    y.output[i] = y_value
+    
+  }
+  return(y.output)
+}
+```
+```{r}
+pred.y.test = myknn(x_train.m, y_train.m, x_test.m, 5)
+```
+```{r}
+# calculate error
+(sum((y_test.m - pred.y.test)^2))/length(y_test.m)
+```
+**ANS: **The MSE of my testing data is 1.404181. It's close to the MSE 1.471 that we get from the r knn package, the slight difference might be caused by rounding issues.
+
+
+# Question 3 Curse of Dimensionality
+
+Let's consider a high-dimensional setting. Keep the data-generating model the same as question 2. In addition to the outcomes and covariates from question 2, we will also generate 95 more noisy variables to make p = 100. In this question, you can use a KNN function from any existing package. 
+
+We consider two different settings to generate that additional set of 95 covariates. Make sure to set random seeds for reproducibility. 
+
+  * Generate another 95-dimensional covariates with all independent standard Gaussian entries.
+  
+```{r}
+# generate covariates
+q3.d.set1 = dt.ger(1,100)
+# add y to the data set
+q3.d.set1 = cbind(q3.d.set1, y)
+```
+
+  * Generate another 95-dimensional covariates using the formula $X^T A$, where $X$ is the original 5-dimensional vector, and $A$ is a $5 \times 95$ dimensional (fixed) matrix that remains the same for all observations. You should generate $A$ just once using i.i.d. uniform $[0, 1]$ entries and then apply $A$ to your current 5-dimensional data. 
+
+```{r}
+# set seed
+set.seed(670144148)
+q3.d.g2 = matrix(runif(475),nrow=5) # generate A matrix
+# bind to get the whole 100 var matrix 
+q3.d.set2 = cbind(q2.d[,1:5], data.matrix(q2.d[,1:5]) %*% q3.d.g2)
+
+# rename columns
+names(q3.d.set2)[1:ncol(q3.d.set2)]<- paste0("X",1:ncol(q3.d.set2))
+# add y to the data set
+q3.d.set2 = cbind(q3.d.set2, y)
+```
+
+
+Fit KNN in both settings (with the total of 100 covariates) and select the best $k$ value. Answer the following questions
+
+Fit KNN for setting 1 
+```{r}
+mse.set1 = rep(NA, 20)
+for(i in 1:20){
+  knn.fit = kknn(y ~ ., q3.d.set1, q3.d.set1, 
+                 k = i, kernel = "rectangular")
+  mse.set1[i] = (sum(q3.d.set1$y - knn.fit$fitted.values)^2)/nrow(q3.d.set1)
+}
+```
+
+Fit KNN for setting 2 
+```{r}
+mse.set2 = rep(NA, 20)
+for(i in 1:20){
+  knn.fit = kknn(y ~ ., q3.d.set2, q3.d.set2, 
+                 k = i, kernel = "rectangular")
+  mse.set2[i] = (sum(q3.d.set2$y - knn.fit$fitted.values)^2)/nrow(q3.d.set2)
+}
+```
+
+
+  a) For the first setting, what is the best $k$ and the best mean squared error for prediction?
+  
+```{r}
+tibble(k, mse.set1) %>% arrange(mse.set1) %>% slice(1:5)
+```
+- Except for k equals to 1 which gives us 0 squared error, we can get the minimum squared error 2.134 when k equals to 20 for data setting 1.
+  
+  
+  b) For the second setting, what is the best $k$ and the best mean squared error for prediction?
+  
+```{r}
+tibble(k, mse.set2) %>% arrange(mse.set2) %>% slice(1:5)
+```  
+  
+- Except for k equals to 1 which gives us 0 squared error, we can get the minimum squared error 0.00025 when k equals to 5 for data setting 2.
+  
+
+c) In which setting $k$NN performs better? Why?
+
+ - KNN performs better in setting 2. Since KNN won't perform good if we have too many dimensions. Though both of the settings have 1000 variables, variables in setting 1 are all independent while variables in setting to are kind of dependent because they all generated by $X^T A$, where A is a fixed matrix. So, the dimension of setting 2 is not as high as the setting 1 in this question. 
