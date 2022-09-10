@@ -1,0 +1,296 @@
+## Question 1 Regression and Optimization with Huber Loss
+
+When fitting linear regressions, outliers could significantly affect the fitting results. However, manually checking and removing outliers can be tricky and time consuming. Some regression methods address this problem by using a more robust loss function. For example, one such regression is to minimize the objective function 
+
+$$
+\frac{1}{n} \sum_{i=1}^n \ell_\delta(y_i - x_i^\text{T} \boldsymbol \beta),
+$$
+where the loss function $\ell_{\delta}$ is the __Huber Loss__, defined as
+$$
+\ell_\delta( a ) =   \begin{cases}
+    \frac{1}{2} a^2       & \quad \text{if } |a| \leq \delta \\
+    \delta(|a| - \frac{1}{2} \delta)  & \quad \text{o.w.}
+  \end{cases}
+$$
+Here is a visualization that compares Huber loss with the $\ell_2$ loss. We can see that the Huber loss assigns much less value when $y_i - x_i^\text{T} \boldsymbol \beta$ is more extreme (outliers). 
+
+```{r}
+  # define the Huber loss function
+  Huber <- function(a, delta = 1) ifelse(abs(a) <= delta, 0.5*a^2, 
+                                         delta*( abs(a) - 0.5*delta))
+  
+  # plot against L2
+  x = seq(-4, 4, 0.01)
+  plot(x, Huber(x), type = "l",
+       xlab = "a", ylab = "Huber Loss",
+       col = "darkorange", ylim = c(0, 8))
+  lines(x, 0.5*x^2, col = "deepskyblue")
+  legend(x = 0, y = 8, legend = c("Huber Loss", "OLS loss"), 
+         col = c("darkorange", "deepskyblue"), lty = 1)
+```
+
+Use the following code to generate 
+
+```{r}
+  # generate data from a simple linear model 
+  set.seed(542)
+  n = 150
+  x = runif(n)
+  X = cbind(1, x)
+  y = X %*% c(0.5, 1) + rnorm(n)
+  # create an outlier
+  y[which.min(X[, 2])] = -30
+```
+
+a) Fit an OLS model with the regular $\ell_2$ loss. Report your coefficients (do not report other information). Although this is only one set of samples, but do you expect this estimator to be biased based on how we set up the observed data? Do you expect the parameter $\beta_1$ to bias upwards or downwards? Explain your reason. Hint: is the outlier pulling the regression line slope up or down?
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+```
+```{r}
+lm.fit = lm(y ~ X - 1)
+lm.fit$coefficients
+```
+The $\beta_0$ is -0.1254 and $\beta_1$ is 1.9037. I expect the $\beta_1$ parameter to be upward biased since the definition of upward biased is $\beta < \beta^{hat}$, we can check the parameter of having outliers and without outliers. The $\beta_1$ without outliers is 0.649 and the one with outliers is 1.904, so we conclude it's upward biased.
+
+
+b) Define your own Huber loss function `huberLoss(b, trainX, trainY)` given a set of observed data with tuning parameter $\delta = 1$. Here, `b` is a $p$-dim parameter vector, `trainX` is a $n \times p$ design matrix and $trainY$ is the outcome. This function should return a scalar as the empirical loss. You can use our `Huber` function in your own code. After defining this loss function, use the `optim()` function to solve the parameter estimates. Finally, report your coefficients.  
+    - Use `b = (0, 0)` as the initial value.
+    - Use `BFGS` as the optimization method.
+
+```{r}
+# define huber loss function
+huberLoss = function(b, trainX, trainY){
+  mean(Huber(trainY - trainX %*% b, delta = 1))
+}
+
+# fit model
+ml.huber = optim(par = c(0, 0), fn = huberLoss, 
+      method = "BFGS", trainX = X, trainY = y)
+
+ml.huber$par
+```
+The estimated $\beta_0$ is 0.7545940 and $\beta_1$ is 0.6223551
+
+c) We still do not know which method performs better in this case. Let's use a simulation study to compare the two methods. Complete the following
+
+    * Set up a simulation for 1000 times. At each time, randomly generate a set of observed data, but also force the outlier with our code `y[which.min(X[, 2])] = -30`.
+    * Fit the regression model with $\ell_2$ loss and Huber loss, and record the slope variable estimates.
+    * Make a side-by-side boxplot to show how these two methods differ in terms of the estimations. Which method seem to have more bias? and report the amount of bias based on your simulation. What can you conclude from the results? Does this match your expectation in part a)? Can you explain this (both OLS and Huber) with the form of loss function, in terms of what their effects are?
+
+```{r}
+  nsim = 1000
+  n = 150
+  l2.slope = rep(NA, nsim)
+  huber.slope = rep(NA, nsim)
+
+  for(i in 1:nsim){
+    X = cbind(1, rnorm(n))
+    y = X %*% c(0.5, 1) + rnorm(n)
+    y[which.min(X[, 2])] = -30
+    
+    # fit huber loss
+    ml.huber.nsim = optim(par = c(0, 0), fn = huberLoss, 
+      method = "BFGS", trainX = X, trainY = y)
+    huber.slope[i] = ml.huber.nsim$par[2]
+    
+    # fit l2 loss
+    ml.l2.nsim = lm(y ~ X - 1)
+    l2.slope[i] = ml.l2.nsim$coefficients[2]
+  }
+```
+```{r}
+# plot side-by-side boxplot
+all.slope = tibble("OLS" = l2.slope, "Huber" = huber.slope)
+boxplot(all.slope)
+```
+```{r}
+# calculate bias
+ols.bias = mean(l2.slope) - 1
+huber.bias = mean(huber.slope) - 1
+paste0('Bias of OLS loss is: ', ols.bias)
+paste0('Bias of huber loss is: ', huber.bias)
+```
+
+From the above result we can conclude OLS loss has more bias. This matches my result in part a. Furthermore, the result might be because OLS loss give outliers more weight, but Hurber loss gives them lesser weight. 
+
+
+## Question 2 Scaling and Coordinate Descent for Linear Regression
+
+**Scaling issue** In the practice, we usually standardize each covariate/feature to mean 0 and standard deviation 1. Standardization is essential when we apply $\ell_2$ and $\ell_1$ penalty on the loss function, because if the covariates are with different scales, then they are penalized differently. Without prior information, we should prevent that from happening. Besides, scaling the data also help to make the optimization more stable, since the step size in many descent algorithms could be affected by the scale.
+
+In practice, after obtaining the coefficients fitted with scaled data, we want to recover the original coefficients of the unscaled data. For this question, we use the following intuition:
+
+\begin{align}
+\frac{Y - \bar{Y}}{\text{sd}_y} =&~ \sum_{j=1}^p \frac{X_j - \bar{X}_j}{\text{sd}_j} \gamma_j \\
+Y =&~ \underbrace{\bar{Y} - \sum_{j=1}^p \bar{X}_j \frac{\text{sd}_y \cdot \gamma_j}{\text{sd}_j}}_{\beta_0} + \sum_{j=1}^p X_j \underbrace{\frac{\text{sd}_y \cdot \gamma_j}{\text{sd}_j}}_{\beta_j},
+\end{align}
+
+  * In this equation, the first line is the model fitted with scaled and centered data. And we obtain the fitted parameters as $\gamma_j$'s
+  * In the second line, the coefficients $\beta_j$'s for the original data is recovered.
+  * When fitting the scaled and centered data, no intercept term is needed. 
+
+Based on this relationship, we perform the following when fitting a linear regression:
+
+  * Center and scale both $\mathbf{X}$ (column-wise) and $\mathbf{y}$ and denote the processed data as $\frac{Y - \bar{Y}}{\text{sd}_y}$ and $\frac{X_j - \bar{X}_j}{\text{sd}_j}$ in the above formula. Make sure that the standard error of each variable is 1 after scaling. This means that you should use $N$, not $N-1$ when calculating the estimation of variance. 
+  * Fit a linear regression using the processed data based on the no-intercept model, and obtain the parameter estimates $\gamma_j$'s.
+  * Recover the original parameters $\beta_0$ and $\beta_j$'s.
+
+Use the following code to generate your data:
+
+```{r, message=FALSE, warning=FALSE}
+  library(MASS)
+```
+```{r}
+  set.seed(10)
+  n = 20
+  p = 3
+  
+  # covariance matrix
+  V = matrix(0.3, p, p)
+  diag(V) = 1
+  
+  # generate data
+  X_org = as.matrix(mvrnorm(n, mu = rep(0, p), Sigma = V))
+  true_b = c(1, 2, 0)
+  y_org = X_org %*% true_b + rnorm(n)
+```
+```{r}
+# orginal data set
+org.data = as.data.frame(cbind(X_org, y_org)) %>% 
+  rename('y'='V4')
+
+# scaled data set
+scal.data = as.data.frame(cbind(scale(X_org)*sqrt((n-1)/n),
+                                scale(y_org)*sqrt((n-1)/n))) %>%
+  rename('y'='V4')
+```
+
+a) Fit an OLS estimator with the original data `Y_org` and `X_org` by `lm()`. Also, fit another OLS with scaled data by `lm()`. Report the coefficients/parameters. Then, transform coefficients from the second approach back to its original scale, and match with the first approach. 
+
+```{r}
+# fit model with oringinal data
+lm.org = lm(y ~ ., org.data)
+coef.org = lm.org$coefficients
+coef.org
+```
+```{r}
+# fit model with scaled data
+lm.scal = lm(y ~ ., scal.data)
+coef.scal = lm.scal$coefficients
+coef.scal
+```
+```{r}
+# calculate recover value
+sd.Y = sd(y_org)
+sd.X = apply(X_org, 2, sd)
+mean.X = apply(X_org, 2, mean)
+mean.Y = mean(y_org)
+
+beta.recover = coef.scal[2:4]*sd.Y/sd.X
+beta0.recover = mean.Y - sum(mean.X * coef.scal[2:4] * sd.Y / sd.X)          
+```
+
+Summarize your results in a single table: The rows should contain three methods: OLS, OLS Scaled, and OLS Recorded, and there should be four columns that represents the coefficients for each method. You can consider using the `kable` function, but it is not required. 
+
+```{r}
+model.name = c("OLS original", "OLS Scaled", "OLS Recovered")
+coef.0 = c(coef.org[1],coef.scal[1],beta0.recover)
+coef.1 = c(coef.org[2],coef.scal[2],beta.recover[1])
+coef.2 = c(coef.org[3],coef.scal[3],beta.recover[2])
+coef.3 = c(coef.org[4],coef.scal[4],beta.recover[3])
+tibble(model.name, coef.0, coef.1, coef.2, coef.3)
+```
+
+b) Instead of using the `lm()` function, write your own coordinate descent code to solve the scaled problem. This function will be modified and used next week when we code the Lasso method. Complete the following steps:
+
+    - i) Given the loss function $L(\beta) =  \| y - X\beta\|^2$ or  $\sum_{i=1}^n (y_i - \sum_{j=0}^p x_{ij} \beta_j)^2$, derive the updating/calculation formula of coefficient $\beta_j$, when holding all other covariates fixed. You must use LaTex to typeset your derivation with proper explaination of notations. Write down the formula (in terms of $y$, $x$ and $\beta$'s) of residual $r$ before and after this update. Based on our lecture, how to make the update of $r$ computationally efficient? 
+
+
+Our loss function is:
+$$L(\beta) =  \| y - X\beta\|^2$$
+This can be written as:
+$$L(\beta) = (y-X\beta)^T(y-X\beta)$$
+And it also equals to:
+$$\dfrac{1}{n}\sum_{k=0}^p(y_i-x_{(-j)}\beta_{(-j)}-x_{j}\beta_{j})$$
+We then set $r = y - X_{(-j)} \beta_{(-j)}$ before/while updating $\beta_j$, the equation of deriving $\beta_{(j)}$ will be:  
+$$
+\frac{\partial L}{ \partial \beta_{j}} 
+= \sum_{i=1}^n x_{ij} (y_i - \sum_{k=0}^p x_{ij} \beta_k) 
+= \sum_{i=1}^n x_{ij} (r_{i} - x_{ij} \beta_j) = 0 
+$$
+
+After solving the equation, we can get the solution of the coefficient $\beta_j$ is:
+$$
+\beta_{j} = x_j^T r / x_j^T x_j
+$$   
+So, for updating formula will be like:
+
+$$\beta_{j}^{(k+1)} = x_j^T r / x_j^T x_j\\$$
+$$r^{new} = r - x_j^T\beta_{j}^{(k+1)} + x_{j+1}^T\beta_{j+1}^{(k)}$$   
+
+    - [30 pts] ii) Implement this coordinate descent method with your own code to solve OLS with the scaled data. Print and report your **scaled coefficients** (no need to recover the original version) and compare with the result from the previous question.
+      - Do not use functions from any additional library.
+      - Start with a vector $\boldsymbol \beta = 0$.
+      - Run your coordinate descent algorithm for a maximum of maxitr = 100 iterations (while each iteration will loop through all variables). However, stop your algorithm if the $\beta$ value of the current iteration is sufficiently similar to the previous one, i.e., $\|\beta^{(k)}− \beta ^{(k−1)}\|_1 \leq$ tol. Set `tol = 1e-7` where $\| \cdot \|_1$ is the L1 distance.
+
+```{r, message=FALSE, warning=FALSE}
+library(janitor)
+```
+
+```{r}
+  mylm_c <- function(x, y, b0 = rep(0, ncol(x)), epsilon = 1e-6, maxitr = 5000)
+    {
+      if (!is.matrix(x)) stop("x must be a matrix")
+      # if (!is.vector(y)) stop("y must be a vector")
+      if (nrow(x) != length(y)) stop("number of observations different")
+      
+      # initialize beta values
+      b = list()
+      loss = rep(NA,0)
+      b1 = b0
+      
+      # iterative update
+      for (k in 1:maxitr)
+      {
+        b0 = b1
+        
+        loss = append(loss, mean((y - x %*% b0)^2))
+        
+        for (j in 1:ncol(x))
+        {
+          b[[(k-1)*ncol(x)+j]] = b1
+          r = y - x[, -j, drop = FALSE] %*% b1[-j]
+          b1[j] = t(r) %*% x[,j] / (t(x[,j, drop = FALSE]) %*% x[,j])
+        }
+        
+        if (max(abs(b0 - b1)) < epsilon)
+          break;
+      }
+  
+      if (k == maxitr) cat("maximum iteration reached\n")
+      return(list("allb" = b, "beta" = b1, "loss" = loss))
+  }
+```
+```{r}
+myfit = mylm_c(as.matrix(scal.data[1:3]), 
+       scal.data$y, 
+       b0 = rep(0, length(scal.data[1:3])))
+
+
+coef.nam = c('coef.1', 'coef.2','coef.3')
+coef.num = myfit$beta
+df = tibble(coef.nam, coef.num) %>% t() %>% row_to_names(row_number = 1)
+rownames(df) <- c("Coordinate Descent OLS Scaled")
+df
+```
+
+    - Make a plot to analyze the convergence of the coordinate descent. On the x-axis, we use the number of iteration. On the y-axis, use $\log(\text{Loss}_k - \text{trueLoss})$. Here, \text{trueLoss} is the emperical loss based on the true optimizor, which we can simply use the solution from the `lm()` function (the scaled version). The $\text{loss}_k$ is the loss function at the begining of the $k$-th iteration (Keep in mind that within each iteration, we will loop over all $\beta_j$). If this plot displays a stragiht line, then we say that this algorithm has a linear convergence rate. Of course, this is at the log scale. 
+
+```{r}
+plot(1:length(myfit$loss), log(myfit$loss - mean(lm.scal$residuals^2)), 
+     pch = 19, col = "red",
+     xlab = "iteration", ylab = "log( MSE diff)")
+```
+
